@@ -1,0 +1,476 @@
+L'interfaccia è divisa in tre aree principali:
+
+Controlli globali
+Parametri dei singoli strumenti
+Griglia del pattern generato
+1. Controlli globali
+
+Questi parametri influenzano l'intero pattern.
+
+BPM
+
+Imposta la velocità del brano in battiti per minuto.
+
+valori bassi = groove più lenti
+valori alti = groove più veloci
+Numerator
+
+Numeratore del tempo.
+
+Esempi:
+
+4 = 4/4
+5 = 5/4
+3 = 3/4
+
+Determina quanti quarti contiene ogni battuta.
+
+Denominator
+
+Denominatore del tempo.
+
+Attualmente il sistema è pensato soprattutto per tempi con denominatore 4.
+
+Esempi:
+
+4/4
+5/4
+3/4
+Bars
+
+Numero di battute generate.
+
+Più battute significano:
+
+più spazio per variazioni
+più possibilità di fill
+pattern meno statici
+Grouping
+
+Rappresenta come viene percepita internamente la battuta.
+
+Esempi:
+
+2+2 per un 4/4
+3+2 per un 5/4
+2+2+3 per un 7/4
+
+Questo parametro influenza gli accenti metrici e aiuta il generatore a dare una struttura più musicale al pattern.
+
+Il totale dei numeri deve corrispondere al numeratore.
+
+Esempio:
+
+Numerator = 5
+Grouping valido = 3+2
+Grouping non valido = 2+2
+Swing
+
+Applica uno spostamento ritmico ai colpi, rendendo il pattern meno rigido.
+
+0 = timing perfettamente dritto
+valori maggiori = maggiore sensazione shuffle / groove
+
+Da usare con moderazione.
+
+Humanize Timing
+
+Introduce piccole variazioni nel timing dei colpi.
+
+Serve a evitare un risultato troppo meccanico.
+
+valori bassi = groove più preciso
+valori alti = groove più umano ma anche più instabile
+
+Se troppo alto, il pattern può sembrare fuori tempo.
+
+Humanize Velocity
+
+Introduce piccole variazioni casuali nella forza dei colpi.
+
+Serve a evitare l'effetto “mitragliatrice”, cioè tanti colpi con identica intensità.
+
+basso = dinamica più uniforme
+alto = dinamica più viva
+Variation
+
+Controlla quanto il pattern varia tra una battuta e l'altra.
+
+basso = pattern più ripetitivo
+alto = pattern più mutevole
+
+Utile per non avere loop troppo statici.
+
+Fill Frequency
+
+Probabilità di inserire fill.
+
+basso = fill rari
+alto = fill frequenti
+
+Se troppo alto, il pattern può diventare troppo pieno o confuso.
+
+Fill Length
+
+Lunghezza del fill.
+
+Indica quanti slot finali della battuta possono essere usati dal fill.
+
+Valori più alti = fill più lunghi.
+
+Fill Intensity
+
+Controlla quanto il fill è presente o aggressivo.
+
+basso = fill leggeri
+alto = fill più pieni e marcati
+Seed
+
+Controlla la casualità del generatore.
+
+se lasciato casuale, ogni generazione può cambiare
+se inserisci sempre lo stesso seed, ottieni lo stesso pattern a parità di parametri
+
+Utile per:
+
+rifare un groove riuscito bene
+confrontare modifiche ai parametri
+Preset
+
+Carica una configurazione predefinita dei parametri.
+
+Se presente, può essere usato come punto di partenza invece di regolare tutto manualmente.
+
+Pulsanti principali
+Generate
+
+Genera un nuovo pattern in base ai parametri attuali.
+
+Export MIDI
+
+Esporta il pattern corrente in un file .mid.
+
+Il file può essere importato in una DAW come Cubase.
+
+Clear
+
+Pulisce il pattern attualmente visualizzato.
+
+Randomize Parameters
+
+Assegna valori casuali ai parametri.
+
+Utile per esplorare combinazioni inattese, ma i risultati possono essere molto variabili.
+
+2. Parametri dei singoli strumenti
+
+Ogni strumento della batteria ha una propria sezione con parametri indipendenti.
+
+Gli strumenti supportati possono includere:
+
+Kick
+Snare
+Hi-Hat Closed
+Hi-Hat Open
+Ride
+Crash
+Tom High
+Tom Mid
+Tom Low
+Enabled
+
+Attiva o disattiva lo strumento.
+
+Se disattivato, quello strumento non genererà colpi.
+
+Density
+
+Controlla quanto spesso lo strumento tende a suonare.
+
+basso = pochi colpi
+alto = più colpi
+
+Non significa automaticamente “più forte”, ma “più presente”.
+
+Hit Probability
+
+Probabilità che uno slot valido venga effettivamente usato.
+
+basso = comportamento più raro
+alto = comportamento più frequente
+
+Lavora insieme a Density.
+
+In pratica:
+
+Density regola la quantità generale
+Hit Probability regola la probabilità locale di usare gli slot possibili
+Velocity Min
+
+Velocità minima dei colpi principali per quello strumento.
+
+Nel MIDI, la velocity corrisponde all'intensità del colpo.
+
+Velocity Max
+
+Velocità massima dei colpi principali.
+
+L'intervallo tra min e max determina quanta dinamica può avere lo strumento.
+
+Esempio:
+
+range stretto = colpi più uniformi
+range largo = colpi più dinamici
+Accent Amount
+
+Controlla quanto i colpi accentati risultano più forti rispetto ai colpi normali.
+
+Valori più alti rendono gli accenti più evidenti.
+
+Allowed Slots
+
+Permette di specificare gli slot in cui lo strumento può suonare.
+
+Utile per restringere la generazione.
+
+Esempi possibili:
+
+solo quarti forti
+solo posizioni sincopate
+solo fine battuta
+
+Se lasciato vuoto, di solito il generatore considera tutti gli slot come potenzialmente validi, salvo altre regole interne.
+
+Forbidden Slots
+
+Permette di specificare slot vietati.
+
+Serve a impedire allo strumento di suonare in certe posizioni.
+
+Utile per:
+
+evitare collisioni
+evitare colpi in posizioni indesiderate
+ripulire il groove
+Syncopation
+
+Controlla quanto lo strumento tende a suonare fuori dagli accenti più prevedibili.
+
+basso = groove più dritto e regolare
+alto = groove più sincopato, nervoso o funky
+
+Se troppo alto, il pattern può perdere stabilità.
+
+Repetition
+
+Controlla quanto lo strumento tende a ripetere schemi simili.
+
+alto = più stabilità
+basso = più varietà
+
+È utile per decidere se vuoi un groove solido o più cangiante.
+
+3. Ghost Notes
+
+Alcuni strumenti possono avere una sezione separata per le ghost notes, ad esempio:
+
+Snare
+Hi-Hat Closed
+Ride
+
+Le ghost notes sono colpi leggeri, secondari, usati per rendere il groove più umano e articolato.
+
+Ghost Notes > Enabled
+
+Attiva o disattiva la generazione delle ghost notes per quello strumento.
+
+Ghost Notes > Probability
+
+Probabilità di generare ghost notes.
+
+basso = ghost rare
+alto = ghost frequenti
+
+Se impostata alta ma non compaiono ghost, può esserci un conflitto con altri parametri come distanza minima, slot consentiti o filtri interni.
+
+Ghost Notes > Density
+
+Controlla quante ghost notes vengono aggiunte in generale.
+
+Lavora insieme a Probability.
+
+Ghost Notes > Velocity Min
+
+Velocità minima delle ghost notes.
+
+Di norma deve essere molto più bassa rispetto ai colpi principali.
+
+Ghost Notes > Velocity Max
+
+Velocità massima delle ghost notes.
+
+Valori consigliati:
+
+ghost: bassi
+main hit: sensibilmente più alti
+
+Se il valore è troppo alto, le ghost smettono di sembrare ghost.
+
+Ghost Notes > Timing Offset
+
+Controlla di quanto le ghost possono essere spostate in anticipo o ritardo rispetto alla griglia.
+
+Serve a rendere il tocco più umano.
+
+Valori troppo alti possono far sembrare il pattern impreciso.
+
+Ghost Notes > Allowed Slots
+
+Permette di limitare le posizioni in cui le ghost possono apparire.
+
+Utile per dire al generatore dove cercare piccoli riempimenti.
+
+Ghost Notes > Min Distance
+
+Distanza minima tra una ghost note e altri colpi importanti.
+
+Serve a evitare sovrapposizioni troppo strette o ghost troppo attaccate ai colpi principali.
+
+Se questo valore è troppo alto, può impedire del tutto la comparsa delle ghost.
+
+Ghost Notes > Placement
+
+Stabilisce dove la ghost può comparire rispetto ai colpi principali.
+
+Valori possibili tipici:
+
+before = prima del colpo principale
+after = dopo il colpo principale
+both = prima o dopo
+
+Questo parametro è molto importante per il feel del groove.
+
+4. La griglia del pattern
+
+La parte centrale mostra il pattern generato come sequenza temporale.
+
+ogni riga = uno strumento
+ogni colonna = uno slot temporale
+
+Con 8 slot per quarto:
+
+4/4 = 32 slot per battuta
+5/4 = 40 slot per battuta
+3/4 = 24 slot per battuta
+
+Se ci sono più battute, gli slot continuano in sequenza.
+
+Colonne evidenziate
+
+Le colonne 1, 9, 17, 25... rappresentano l'inizio di ogni quarto.
+
+Sono mostrate più chiaramente per rendere leggibile la struttura ritmica.
+
+Legenda
+
+Ogni cella può contenere:
+
+M = Main hit
+A = Accent hit
+G = Ghost hit
+Offset sotto la lettera
+
+Sotto il simbolo può comparire un valore come:
+
++3
+-5
+
+Questo indica l'offset di timing in millisecondi rispetto alla griglia teorica.
+
+valore positivo = colpo leggermente in ritardo
+valore negativo = colpo leggermente in anticipo
+
+Serve a visualizzare il micro-timing umano.
+
+Suggerimenti pratici per i test
+Per testare il groove base
+
+Prova prima con:
+
+4/4
+1 o 2 battute
+swing basso o zero
+humanize moderato
+
+Così capisci meglio il comportamento del generatore.
+
+Per testare la ripetizione
+
+Aumenta:
+
+Bars
+Repetition
+
+e osserva se il pattern resta coerente.
+
+Per testare la varietà
+
+Aumenta:
+
+Variation
+Syncopation
+Fill Frequency
+
+ma non tutto insieme all'inizio, altrimenti diventa difficile capire quale parametro produce cosa.
+
+Per testare le ghost notes
+
+Usa valori estremi temporaneamente:
+
+Ghost Probability = alta
+Ghost Density = alta
+Ghost Min Distance = bassa
+Placement = both
+
+Se ancora non compaiono, è probabile che ci sia una limitazione logica o un bug nel generatore.
+
+Per testare il timing
+
+Confronta:
+
+Humanize Timing basso
+Humanize Timing alto
+
+e ascolta in DAW se il pattern guadagna groove oppure diventa impreciso.
+
+Interpretazione rapida dei parametri
+
+Se vuoi una sintesi molto veloce:
+
+Density = quanto suona
+Hit Probability = quanto spesso usa uno slot valido
+Velocity = quanto forte suona
+Accent Amount = quanto spiccano gli accenti
+Syncopation = quanto esce dai punti prevedibili
+Repetition = quanto si ripete
+Variation = quanto cambia tra le battute
+Humanize = quanto smette di essere robotico
+Ghost Notes = quanto diventa umano e dettagliato
+Note finali
+
+Questo tool non è uno step sequencer manuale classico: è un generatore automatico parametrico.
+
+Quindi il comportamento finale nasce dalla combinazione di:
+
+regole interne
+probabilità
+vincoli metrici
+parametri impostati
+
+Per questo conviene testare i parametri in modo graduale, modificandone pochi per volta.
+
+Se un comportamento atteso non compare, il problema può dipendere da:
+
+interazioni tra parametri
+vincoli troppo restrittivi
+oppure logiche interne da affinare
