@@ -190,6 +190,20 @@ class ApiTests(unittest.TestCase):
         ghost_count = sum(1 for events in updated["events"].values() for event in events if event["hit_type"] == "ghost")
         self.assertGreater(ghost_count, 0)
 
+    def test_generate_ghosts_passes_seed_to_core_reroll(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120))
+        captured = {}
+        real_reroll = generate_ghosts.__globals__["generator"].regenerate_ghost_hits
+
+        def fake_reroll(pattern, seed=None):
+            captured["seed"] = seed
+            return real_reroll(pattern, seed=seed)
+
+        with patch("api.generator.regenerate_ghost_hits", side_effect=fake_reroll):
+            generate_ghosts(PatternGenerateGhostsRequest(pattern=PatternPayloadRequest(**payload), seed=9876))
+
+        self.assertEqual(captured["seed"], 9876)
+
     def test_export_midi_uses_pattern_payload(self) -> None:
         payload = generate_pattern(GenerateRequest(bpm=120, grouping="3+2"))
         payload["events"]["kick"] = [
@@ -323,6 +337,20 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(settings.fill_intensity, "medium")
         self.assertEqual(settings.fill_length, "long")
         self.assertEqual(settings.fill_every, 4)
+
+    def test_generate_passes_seed_override_to_settings(self) -> None:
+        captured = {}
+        real_generate = generate.__globals__["generator"].generate
+
+        def fake_generate(settings, instruments):
+            captured["settings"] = settings
+            return real_generate(settings, instruments)
+
+        with patch("api.generator.generate", side_effect=fake_generate):
+            response = generate(GenerateRequest(bpm=118, seed=12345))
+
+        self.addCleanup(_delete_file, response.path)
+        self.assertEqual(captured["settings"].seed, 12345)
 
     def test_generate_passes_kick_overrides_to_instruments(self) -> None:
         captured = {}

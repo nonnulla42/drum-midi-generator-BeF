@@ -79,6 +79,7 @@ export type Preset = {
 export type GenerateMidiInput = {
   bpm: number;
   preset?: string;
+  seed?: number;
   bars: number;
   grouping: string;
   swing: number;
@@ -269,6 +270,7 @@ type PatternMoveEditInput = {
 
 type PatternGenerateGhostsInput = {
   pattern: GeneratedPattern;
+  seed?: number;
   snare_enabled: boolean;
   snare_ghost_enabled: boolean;
   snare_ghost_density: number;

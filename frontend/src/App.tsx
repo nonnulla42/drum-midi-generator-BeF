@@ -231,6 +231,7 @@ function App() {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState(CUSTOM_PRESET_ID);
   const [bpm, setBpm] = useState(120);
+  const [seed, setSeed] = useState<number | "random">("random");
   const [bars, setBars] = useState(1);
   const [grouping, setGrouping] = useState("4");
   const [swing, setSwing] = useState(0);
@@ -324,6 +325,7 @@ function App() {
   } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [generateError, setGenerateError] = useState("");
+  const [ghostRerollCount, setGhostRerollCount] = useState(0);
   const patternPlayerRef = useRef<PatternPlayer | null>(null);
 
   const currentGroupingError = groupingError(grouping);
@@ -419,6 +421,7 @@ function App() {
   function applyPreset(preset: Preset) {
     setSelectedPreset(preset.id);
     setBpm(preset.settings.bpm);
+    setSeed("random");
     setBars(preset.settings.bars);
     setGrouping(preset.settings.grouping);
     setSwing(preset.settings.swing);
@@ -483,6 +486,7 @@ function App() {
     setTomsVelocityMax(preset.toms.velocity_max);
     stopPlaybackStatefully();
     setPattern(null);
+    setGhostRerollCount(0);
     setGenerateError("");
   }
 
@@ -534,6 +538,7 @@ function App() {
   function buildRequest(): GenerateMidiInput {
     return {
       bpm,
+      seed: seed === "random" ? undefined : seed,
       bars,
       grouping: normalizeGrouping(grouping),
       swing,
@@ -675,6 +680,7 @@ function App() {
     try {
       const nextPattern = await generatePattern(buildRequest());
       setPattern(nextPattern);
+      setGhostRerollCount(0);
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to generate pattern.");
     } finally {
@@ -722,6 +728,7 @@ function App() {
       stopPlaybackStatefully();
       const nextPattern = await generatePatternGhosts({
         pattern,
+        seed: seed === "random" ? undefined : seed + ghostRerollCount + 1,
         snare_enabled: snareEnabled,
         snare_ghost_enabled: snareGhostEnabled,
         snare_ghost_density: snareGhostDensity,
@@ -741,6 +748,7 @@ function App() {
         ride_ghost_placement: rideGhostPlacement,
       });
       setPattern(nextPattern);
+      setGhostRerollCount((current) => current + 1);
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to generate ghost notes.");
     } finally {
@@ -749,16 +757,26 @@ function App() {
   }
 
   async function handlePlay() {
-    if (!pattern) {
-      setGenerateError("Generate a pattern before playback.");
+    const validationError = getValidationError();
+    if (validationError) {
+      setGenerateError(validationError);
       return;
     }
 
     setGenerateError("");
     try {
-      await getPatternPlayer().play(pattern, isLoopEnabled, bpm);
+      let activePattern = pattern;
+      if (!activePattern) {
+        setIsGeneratingPattern(true);
+        activePattern = await generatePattern(buildRequest());
+        setPattern(activePattern);
+        setGhostRerollCount(0);
+        setIsGeneratingPattern(false);
+      }
+      await getPatternPlayer().play(activePattern, isLoopEnabled, bpm);
       setPlaybackStatus("Playing");
     } catch (error) {
+      setIsGeneratingPattern(false);
       setGenerateError(error instanceof Error ? error.message : "Failed to start playback.");
       setPlaybackStatus("Stopped");
     }
@@ -769,19 +787,85 @@ function App() {
   }
 
   async function handleRestart() {
-    if (!pattern) {
-      setGenerateError("Generate a pattern before restarting playback.");
+    const validationError = getValidationError();
+    if (validationError) {
+      setGenerateError(validationError);
       return;
     }
 
     setGenerateError("");
     try {
-      await getPatternPlayer().restart(bpm);
+      if (!pattern) {
+        setIsGeneratingPattern(true);
+        const nextPattern = await generatePattern(buildRequest());
+        setPattern(nextPattern);
+        setGhostRerollCount(0);
+        setIsGeneratingPattern(false);
+        await getPatternPlayer().play(nextPattern, isLoopEnabled, bpm);
+      } else {
+        await getPatternPlayer().restart(bpm);
+      }
       setPlaybackStatus("Playing");
     } catch (error) {
+      setIsGeneratingPattern(false);
       setGenerateError(error instanceof Error ? error.message : "Failed to restart playback.");
       setPlaybackStatus("Stopped");
     }
+  }
+
+  function handleClearPattern() {
+    stopPlaybackStatefully();
+    setPattern(null);
+    setGhostRerollCount(0);
+    setGenerateError("");
+  }
+
+  function handleRandomizeParameters() {
+    const rng = Math.random;
+    const randomChoice = <T,>(values: T[]) => values[Math.floor(rng() * values.length)];
+    const randomFloat = (min: number, max: number, digits = 2) =>
+      Number((min + (max - min) * rng()).toFixed(digits));
+    const randomInt = (min: number, max: number) => Math.floor(rng() * (max - min + 1)) + min;
+    const betaLikePulseSpace = () => Math.min(0.85, Number((Math.pow(rng(), 1.6) * (1 - Math.pow(rng(), 3.2)) + rng() * 0.15).toFixed(2)));
+
+    setSelectedPreset(CUSTOM_PRESET_ID);
+    setGhostRerollCount(0);
+    setGenerateError("");
+    setSwing(randomFloat(0, 0.28));
+    setBarSimilarity(randomFloat(0, 1));
+    setBars(randomChoice([1, 2, 4, 8]));
+    setFillEvery(randomChoice([1, 2, 4, 8]));
+    setFillLength(randomChoice(["short", "medium", "long"]));
+    setFillIntensity(randomChoice(["off", "low", "medium", "high"]));
+    setSeed(randomInt(0, 999999));
+
+    setKickDensity(randomFloat(0.1, 0.95));
+    setKickSyncopation(randomInt(0, 5));
+    setKickTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+
+    setSnareDensity(randomFloat(0.1, 0.95));
+    setSnareSyncopation(randomInt(0, 5));
+    setSnareTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+    setSnareGhostDensity(randomFloat(0.05, 0.45));
+    setSnareGhostVelocity(randomInt(22, 42));
+
+    setHihatClosedDivision(randomChoice(["quarter", "eighth", "sixteenth"]));
+    setHihatClosedSpace(betaLikePulseSpace());
+    setHihatClosedTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+    setHihatClosedGhostDensity(randomFloat(0.05, 0.45));
+    setHihatClosedGhostVelocity(randomInt(22, 42));
+
+    setRideDivision(randomChoice(["quarter", "eighth", "sixteenth"]));
+    setRideSpace(betaLikePulseSpace());
+    setRideTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+    setRideGhostDensity(randomFloat(0.05, 0.45));
+    setRideGhostVelocity(randomInt(22, 42));
+
+    setHihatOpenDensity(randomFloat(0.05, 0.9));
+    setCrashDensity(randomFloat(0.04, 0.5));
+    setTomsHighHits(randomInt(0, 3));
+    setTomsMidHits(randomInt(0, 3));
+    setTomsLowHits(randomInt(0, 3));
   }
 
   return (
@@ -868,6 +952,26 @@ function App() {
               <label className="field">
                 <span>Time Signature</span>
                 <input type="text" value={timeSignature} readOnly />
+              </label>
+
+              <label className="field">
+                <span>Seed</span>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={seed === "random" ? "" : seed}
+                  placeholder="Random"
+                  onChange={(event) => {
+                    const value = event.target.value.trim();
+                    if (value === "") {
+                      setSeed("random");
+                      return;
+                    }
+                    switchToCustomIfNeeded();
+                    setSeed(Number(value));
+                  }}
+                />
               </label>
             </section>
 
@@ -1039,6 +1143,24 @@ function App() {
                     }
                   >
                     {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={handleClearPattern}
+                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                  >
+                    Clear
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={handleRandomizeParameters}
+                    disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                  >
+                    Randomize
                   </button>
 
                   <button

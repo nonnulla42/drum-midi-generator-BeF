@@ -37,6 +37,7 @@ app.mount("/assets/drums", StaticFiles(directory=Path(__file__).resolve().parent
 class GenerateRequest(BaseModel):
     bpm: int
     preset: str | None = None
+    seed: int | None = Field(default=None, ge=0)
     bars: int | None = None
     grouping: str | None = None
     swing: float | None = Field(default=None, ge=0.0, le=0.65)
@@ -151,6 +152,7 @@ class PatternMoveRequest(BaseModel):
 
 class PatternGenerateGhostsRequest(BaseModel):
     pattern: PatternPayloadRequest
+    seed: int | None = Field(default=None, ge=0)
     snare_enabled: bool | None = None
     snare_ghost_enabled: bool | None = None
     snare_ghost_density: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -309,6 +311,8 @@ def _build_pattern(request: GenerateRequest):
             parse_grouping(settings.grouping)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if request.seed is not None:
+        settings.seed = request.seed
     if request.swing is not None:
         settings.swing = request.swing
     if request.humanize_timing is not None:
@@ -593,7 +597,7 @@ def move_hit(request: PatternMoveRequest):
 def generate_ghosts(request: PatternGenerateGhostsRequest):
     pattern = _pattern_from_payload(request.pattern)
     _apply_ghost_regeneration_overrides(pattern, request)
-    generator.regenerate_ghost_hits(pattern)
+    generator.regenerate_ghost_hits(pattern, seed=request.seed)
     return serialize_pattern(pattern)
 
 
