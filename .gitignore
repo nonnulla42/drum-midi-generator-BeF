@@ -1,2 +1,43 @@
+# =========================
+# Python (backend)
+# =========================
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+.venv/
+venv/
+env/
+
+# Logs
+*.log
+
+# =========================
+# Node / Frontend (Vite)
+# =========================
+node_modules/
+dist/
+build/
+.vite/
+
+# =========================
+# Environment variables
+# =========================
+.env
+.env.*
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+.vscode/
+
+# =========================
+# GhostGroove specific
+# =========================
+*.mid
+*.midi
+temp/
+tmp/

@@ -1,0 +1,331 @@
+import os
+import tempfile
+from typing import Literal
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
+
+from core.generator import DrumPatternGenerator
+from core.instruments import build_default_instruments
+from core.midi_export import export_pattern_to_midi
+from core.pattern import GlobalSettings
+from core.presets import load_preset, preset_names
+from core.timing import parse_grouping
+
+app = FastAPI()
+generator = DrumPatternGenerator()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class GenerateRequest(BaseModel):
+    bpm: int
+    preset: str | None = None
+    bars: int | None = None
+    grouping: str | None = None
+    swing: float | None = Field(default=None, ge=0.0, le=0.65)
+    humanize_timing: int | None = Field(default=None, ge=0, le=24)
+    humanize_velocity: int | None = Field(default=None, ge=0, le=24)
+    bar_similarity: float | None = Field(default=None, ge=0.0, le=1.0)
+    fill_intensity: Literal["off", "low", "medium", "high"] | None = None
+    fill_length: Literal["short", "medium", "long"] | None = None
+    fill_every: int | None = Field(default=None, gt=0)
+    kick_enabled: bool | None = None
+    kick_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    kick_syncopation: int | None = Field(default=None, ge=0, le=5)
+    kick_timing_feel: Literal["neutral", "push", "drag", "random"] | None = None
+    kick_velocity_min: int | None = Field(default=None, ge=1, le=127)
+    kick_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    snare_enabled: bool | None = None
+    snare_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    snare_syncopation: int | None = Field(default=None, ge=0, le=5)
+    snare_timing_feel: Literal["neutral", "push", "drag", "random"] | None = None
+    snare_velocity_min: int | None = Field(default=None, ge=1, le=127)
+    snare_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    hihat_closed_enabled: bool | None = None
+    hihat_closed_division: Literal["quarter", "eighth", "sixteenth"] | None = None
+    hihat_closed_space: float | None = Field(default=None, ge=0.0, le=1.0)
+    hihat_closed_timing_feel: Literal["neutral", "push", "drag", "random"] | None = None
+    hihat_closed_velocity_min: int | None = Field(default=None, ge=1, le=127)
+    hihat_closed_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    ride_enabled: bool | None = None
+    ride_division: Literal["quarter", "eighth", "sixteenth"] | None = None
+    ride_space: float | None = Field(default=None, ge=0.0, le=1.0)
+    ride_timing_feel: Literal["neutral", "push", "drag", "random"] | None = None
+    ride_velocity_min: int | None = Field(default=None, ge=1, le=127)
+    ride_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    hihat_open_enabled: bool | None = None
+    hihat_open_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    hihat_open_velocity_min: int | None = Field(default=None, ge=1, le=127)
+    hihat_open_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    crash_enabled: bool | None = None
+    crash_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    crash_velocity_min: int | None = Field(default=None, ge=1, le=127)
+    crash_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    toms_high_hits: int | None = Field(default=None, ge=0, le=3)
+    toms_mid_hits: int | None = Field(default=None, ge=0, le=3)
+    toms_low_hits: int | None = Field(default=None, ge=0, le=3)
+    toms_velocity_min: int | None = Field(default=None, ge=1, le=127)
+    toms_velocity_max: int | None = Field(default=None, ge=1, le=127)
+
+
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "GhostGroove backend is running"}
+
+
+@app.get("/presets")
+def presets():
+    items = []
+    for name in preset_names():
+        settings, instruments = load_preset(name)
+        kick = instruments["kick"]
+        snare = instruments["snare"]
+        hihat_closed = instruments["hihat_closed"]
+        ride = instruments["ride"]
+        hihat_open = instruments["hihat_open"]
+        crash = instruments["crash"]
+        tom_high = instruments["tom_high"]
+        tom_mid = instruments["tom_mid"]
+        tom_low = instruments["tom_low"]
+        items.append(
+            {
+                "id": name,
+                "label": name,
+                "settings": {
+                    "bpm": settings.bpm,
+                    "bars": settings.bars,
+                    "grouping": settings.grouping,
+                    "swing": settings.swing,
+                    "humanize_timing": settings.humanize_timing,
+                    "humanize_velocity": settings.humanize_velocity,
+                    "bar_similarity": settings.bar_similarity,
+                    "fill_intensity": settings.fill_intensity,
+                    "fill_length": settings.fill_length,
+                    "fill_every": settings.fill_every,
+                },
+                "kick": {
+                    "enabled": kick.enabled,
+                    "density": kick.density,
+                    "syncopation": round(kick.syncopation_amount * 5),
+                    "timing_feel": kick.timing_feel,
+                    "velocity_min": kick.velocity_min,
+                    "velocity_max": kick.velocity_max,
+                },
+                "snare": {
+                    "enabled": snare.enabled,
+                    "density": snare.density,
+                    "syncopation": round(snare.syncopation_amount * 5),
+                    "timing_feel": snare.timing_feel,
+                    "velocity_min": snare.velocity_min,
+                    "velocity_max": snare.velocity_max,
+                },
+                "hihat_closed": {
+                    "enabled": hihat_closed.enabled,
+                    "division": hihat_closed.pulse_division,
+                    "space": hihat_closed.pulse_space,
+                    "timing_feel": hihat_closed.timing_feel,
+                    "velocity_min": hihat_closed.velocity_min,
+                    "velocity_max": hihat_closed.velocity_max,
+                },
+                "ride": {
+                    "enabled": ride.enabled,
+                    "division": ride.pulse_division,
+                    "space": ride.pulse_space,
+                    "timing_feel": ride.timing_feel,
+                    "velocity_min": ride.velocity_min,
+                    "velocity_max": ride.velocity_max,
+                },
+                "hihat_open": {
+                    "enabled": hihat_open.enabled,
+                    "density": hihat_open.density,
+                    "velocity_min": hihat_open.velocity_min,
+                    "velocity_max": hihat_open.velocity_max,
+                },
+                "crash": {
+                    "enabled": crash.enabled,
+                    "density": crash.density,
+                    "velocity_min": crash.velocity_min,
+                    "velocity_max": crash.velocity_max,
+                },
+                "toms": {
+                    "high_hits": tom_high.tom_hit_count,
+                    "mid_hits": tom_mid.tom_hit_count,
+                    "low_hits": tom_low.tom_hit_count,
+                    "velocity_min": tom_high.velocity_min,
+                    "velocity_max": tom_high.velocity_max,
+                },
+            }
+        )
+    return items
+
+
+def _delete_file(path: str) -> None:
+    if os.path.exists(path):
+        os.unlink(path)
+
+
+@app.post("/generate")
+def generate(request: GenerateRequest):
+    if request.preset is None:
+        settings = GlobalSettings()
+        instruments = build_default_instruments()
+    else:
+        try:
+            settings, instruments = load_preset(request.preset)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    settings.bpm = request.bpm
+    if request.bars is not None:
+        settings.bars = request.bars
+    if request.grouping is not None:
+        settings.grouping = request.grouping.strip()
+        try:
+            parse_grouping(settings.grouping)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if request.swing is not None:
+        settings.swing = request.swing
+    if request.humanize_timing is not None:
+        settings.humanize_timing = request.humanize_timing
+    if request.humanize_velocity is not None:
+        settings.humanize_velocity = request.humanize_velocity
+    if request.bar_similarity is not None:
+        settings.bar_similarity = request.bar_similarity
+    if request.fill_intensity is not None:
+        settings.fill_intensity = request.fill_intensity
+    if request.fill_length is not None:
+        settings.fill_length = request.fill_length
+    if request.fill_every is not None:
+        settings.fill_every = request.fill_every
+    kick = instruments["kick"]
+    if request.kick_enabled is not None:
+        kick.enabled = request.kick_enabled
+    if request.kick_density is not None:
+        kick.density = request.kick_density
+    if request.kick_syncopation is not None:
+        kick.syncopation_amount = request.kick_syncopation / 5
+    if request.kick_timing_feel is not None:
+        kick.timing_feel = request.kick_timing_feel
+    if request.kick_velocity_min is not None:
+        kick.velocity_min = request.kick_velocity_min
+    if request.kick_velocity_max is not None:
+        kick.velocity_max = request.kick_velocity_max
+    if kick.velocity_max < kick.velocity_min:
+        raise HTTPException(status_code=400, detail="Kick velocity max must be greater than or equal to min")
+    snare = instruments["snare"]
+    if request.snare_enabled is not None:
+        snare.enabled = request.snare_enabled
+    if request.snare_density is not None:
+        snare.density = request.snare_density
+    if request.snare_syncopation is not None:
+        snare.syncopation_amount = request.snare_syncopation / 5
+    if request.snare_timing_feel is not None:
+        snare.timing_feel = request.snare_timing_feel
+    if request.snare_velocity_min is not None:
+        snare.velocity_min = request.snare_velocity_min
+    if request.snare_velocity_max is not None:
+        snare.velocity_max = request.snare_velocity_max
+    if snare.velocity_max < snare.velocity_min:
+        raise HTTPException(status_code=400, detail="Snare velocity max must be greater than or equal to min")
+    hihat_closed = instruments["hihat_closed"]
+    if request.hihat_closed_enabled is not None:
+        hihat_closed.enabled = request.hihat_closed_enabled
+    if request.hihat_closed_division is not None:
+        hihat_closed.pulse_division = request.hihat_closed_division
+    if request.hihat_closed_space is not None:
+        hihat_closed.pulse_space = request.hihat_closed_space
+    if request.hihat_closed_timing_feel is not None:
+        hihat_closed.timing_feel = request.hihat_closed_timing_feel
+    if request.hihat_closed_velocity_min is not None:
+        hihat_closed.velocity_min = request.hihat_closed_velocity_min
+    if request.hihat_closed_velocity_max is not None:
+        hihat_closed.velocity_max = request.hihat_closed_velocity_max
+    if hihat_closed.velocity_max < hihat_closed.velocity_min:
+        raise HTTPException(status_code=400, detail="Hi-Hat Closed velocity max must be greater than or equal to min")
+    ride = instruments["ride"]
+    if request.ride_enabled is not None:
+        ride.enabled = request.ride_enabled
+    if request.ride_division is not None:
+        ride.pulse_division = request.ride_division
+    if request.ride_space is not None:
+        ride.pulse_space = request.ride_space
+    if request.ride_timing_feel is not None:
+        ride.timing_feel = request.ride_timing_feel
+    if request.ride_velocity_min is not None:
+        ride.velocity_min = request.ride_velocity_min
+    if request.ride_velocity_max is not None:
+        ride.velocity_max = request.ride_velocity_max
+    if ride.velocity_max < ride.velocity_min:
+        raise HTTPException(status_code=400, detail="Ride velocity max must be greater than or equal to min")
+    hihat_open = instruments["hihat_open"]
+    if request.hihat_open_enabled is not None:
+        hihat_open.enabled = request.hihat_open_enabled
+    if request.hihat_open_density is not None:
+        hihat_open.density = request.hihat_open_density
+    if request.hihat_open_velocity_min is not None:
+        hihat_open.velocity_min = request.hihat_open_velocity_min
+    if request.hihat_open_velocity_max is not None:
+        hihat_open.velocity_max = request.hihat_open_velocity_max
+    if hihat_open.velocity_max < hihat_open.velocity_min:
+        raise HTTPException(status_code=400, detail="Hi-Hat Open velocity max must be greater than or equal to min")
+    crash = instruments["crash"]
+    if request.crash_enabled is not None:
+        crash.enabled = request.crash_enabled
+    if request.crash_density is not None:
+        crash.density = request.crash_density
+    if request.crash_velocity_min is not None:
+        crash.velocity_min = request.crash_velocity_min
+    if request.crash_velocity_max is not None:
+        crash.velocity_max = request.crash_velocity_max
+    if crash.velocity_max < crash.velocity_min:
+        raise HTTPException(status_code=400, detail="Crash velocity max must be greater than or equal to min")
+    tom_high = instruments["tom_high"]
+    tom_mid = instruments["tom_mid"]
+    tom_low = instruments["tom_low"]
+    if request.toms_high_hits is not None:
+        tom_high.tom_hit_count = request.toms_high_hits
+        tom_high.enabled = request.toms_high_hits > 0
+    if request.toms_mid_hits is not None:
+        tom_mid.tom_hit_count = request.toms_mid_hits
+        tom_mid.enabled = request.toms_mid_hits > 0
+    if request.toms_low_hits is not None:
+        tom_low.tom_hit_count = request.toms_low_hits
+        tom_low.enabled = request.toms_low_hits > 0
+    if request.toms_velocity_min is not None:
+        tom_high.velocity_min = request.toms_velocity_min
+        tom_mid.velocity_min = request.toms_velocity_min
+        tom_low.velocity_min = request.toms_velocity_min
+    if request.toms_velocity_max is not None:
+        tom_high.velocity_max = request.toms_velocity_max
+        tom_mid.velocity_max = request.toms_velocity_max
+        tom_low.velocity_max = request.toms_velocity_max
+    if tom_high.velocity_max < tom_high.velocity_min:
+        raise HTTPException(status_code=400, detail="Toms velocity max must be greater than or equal to min")
+
+    pattern = generator.generate(settings, instruments)
+
+    file_descriptor, midi_path = tempfile.mkstemp(suffix=".mid")
+    os.close(file_descriptor)
+
+    export_pattern_to_midi(pattern, midi_path, bpm_override=request.bpm)
+
+    return FileResponse(
+        midi_path,
+        filename="pattern.mid",
+        media_type="audio/midi",
+        background=BackgroundTask(_delete_file, midi_path),
+    )
