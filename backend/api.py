@@ -58,18 +58,30 @@ class GenerateRequest(BaseModel):
     snare_timing_feel: Literal["neutral", "push", "drag", "random"] | None = None
     snare_velocity_min: int | None = Field(default=None, ge=1, le=127)
     snare_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    snare_ghost_enabled: bool | None = None
+    snare_ghost_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    snare_ghost_velocity: int | None = Field(default=None, ge=1, le=127)
+    snare_ghost_placement: Literal["before", "after", "both"] | None = None
     hihat_closed_enabled: bool | None = None
     hihat_closed_division: Literal["quarter", "eighth", "sixteenth"] | None = None
     hihat_closed_space: float | None = Field(default=None, ge=0.0, le=1.0)
     hihat_closed_timing_feel: Literal["neutral", "push", "drag", "random"] | None = None
     hihat_closed_velocity_min: int | None = Field(default=None, ge=1, le=127)
     hihat_closed_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    hihat_closed_ghost_enabled: bool | None = None
+    hihat_closed_ghost_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    hihat_closed_ghost_velocity: int | None = Field(default=None, ge=1, le=127)
+    hihat_closed_ghost_placement: Literal["before", "after", "both"] | None = None
     ride_enabled: bool | None = None
     ride_division: Literal["quarter", "eighth", "sixteenth"] | None = None
     ride_space: float | None = Field(default=None, ge=0.0, le=1.0)
     ride_timing_feel: Literal["neutral", "push", "drag", "random"] | None = None
     ride_velocity_min: int | None = Field(default=None, ge=1, le=127)
     ride_velocity_max: int | None = Field(default=None, ge=1, le=127)
+    ride_ghost_enabled: bool | None = None
+    ride_ghost_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    ride_ghost_velocity: int | None = Field(default=None, ge=1, le=127)
+    ride_ghost_placement: Literal["before", "after", "both"] | None = None
     hihat_open_enabled: bool | None = None
     hihat_open_density: float | None = Field(default=None, ge=0.0, le=1.0)
     hihat_open_velocity_min: int | None = Field(default=None, ge=1, le=127)
@@ -186,6 +198,14 @@ def presets():
                     "timing_feel": snare.timing_feel,
                     "velocity_min": snare.velocity_min,
                     "velocity_max": snare.velocity_max,
+                    "ghost_settings": {
+                        "enabled": snare.ghost_settings.enabled,
+                        "density": snare.ghost_settings.density,
+                        "velocity": snare.ghost_settings.velocity,
+                        "placement": snare.ghost_settings.placement,
+                    }
+                    if snare.ghost_settings is not None
+                    else None,
                 },
                 "hihat_closed": {
                     "enabled": hihat_closed.enabled,
@@ -194,6 +214,14 @@ def presets():
                     "timing_feel": hihat_closed.timing_feel,
                     "velocity_min": hihat_closed.velocity_min,
                     "velocity_max": hihat_closed.velocity_max,
+                    "ghost_settings": {
+                        "enabled": hihat_closed.ghost_settings.enabled,
+                        "density": hihat_closed.ghost_settings.density,
+                        "velocity": hihat_closed.ghost_settings.velocity,
+                        "placement": hihat_closed.ghost_settings.placement,
+                    }
+                    if hihat_closed.ghost_settings is not None
+                    else None,
                 },
                 "ride": {
                     "enabled": ride.enabled,
@@ -202,6 +230,14 @@ def presets():
                     "timing_feel": ride.timing_feel,
                     "velocity_min": ride.velocity_min,
                     "velocity_max": ride.velocity_max,
+                    "ghost_settings": {
+                        "enabled": ride.ghost_settings.enabled,
+                        "density": ride.ghost_settings.density,
+                        "velocity": ride.ghost_settings.velocity,
+                        "placement": ride.ghost_settings.placement,
+                    }
+                    if ride.ghost_settings is not None
+                    else None,
                 },
                 "hihat_open": {
                     "enabled": hihat_open.enabled,
@@ -293,6 +329,16 @@ def _build_pattern(request: GenerateRequest):
         snare.velocity_min = request.snare_velocity_min
     if request.snare_velocity_max is not None:
         snare.velocity_max = request.snare_velocity_max
+    if snare.ghost_settings is not None:
+        if request.snare_ghost_enabled is not None:
+            snare.ghost_settings.enabled = request.snare_ghost_enabled
+        if request.snare_ghost_density is not None:
+            snare.ghost_settings.density = request.snare_ghost_density
+        if request.snare_ghost_velocity is not None:
+            snare.ghost_settings.velocity = request.snare_ghost_velocity
+            snare.ghost_settings.velocity_min, snare.ghost_settings.velocity_max = snare.ghost_settings.velocity_bounds()
+        if request.snare_ghost_placement is not None:
+            snare.ghost_settings.placement = request.snare_ghost_placement
     if snare.velocity_max < snare.velocity_min:
         raise HTTPException(status_code=400, detail="Snare velocity max must be greater than or equal to min")
     hihat_closed = instruments["hihat_closed"]
@@ -308,6 +354,19 @@ def _build_pattern(request: GenerateRequest):
         hihat_closed.velocity_min = request.hihat_closed_velocity_min
     if request.hihat_closed_velocity_max is not None:
         hihat_closed.velocity_max = request.hihat_closed_velocity_max
+    if hihat_closed.ghost_settings is not None:
+        if request.hihat_closed_ghost_enabled is not None:
+            hihat_closed.ghost_settings.enabled = request.hihat_closed_ghost_enabled
+        if request.hihat_closed_ghost_density is not None:
+            hihat_closed.ghost_settings.density = request.hihat_closed_ghost_density
+        if request.hihat_closed_ghost_velocity is not None:
+            hihat_closed.ghost_settings.velocity = request.hihat_closed_ghost_velocity
+            (
+                hihat_closed.ghost_settings.velocity_min,
+                hihat_closed.ghost_settings.velocity_max,
+            ) = hihat_closed.ghost_settings.velocity_bounds()
+        if request.hihat_closed_ghost_placement is not None:
+            hihat_closed.ghost_settings.placement = request.hihat_closed_ghost_placement
     if hihat_closed.velocity_max < hihat_closed.velocity_min:
         raise HTTPException(status_code=400, detail="Hi-Hat Closed velocity max must be greater than or equal to min")
     ride = instruments["ride"]
@@ -323,6 +382,16 @@ def _build_pattern(request: GenerateRequest):
         ride.velocity_min = request.ride_velocity_min
     if request.ride_velocity_max is not None:
         ride.velocity_max = request.ride_velocity_max
+    if ride.ghost_settings is not None:
+        if request.ride_ghost_enabled is not None:
+            ride.ghost_settings.enabled = request.ride_ghost_enabled
+        if request.ride_ghost_density is not None:
+            ride.ghost_settings.density = request.ride_ghost_density
+        if request.ride_ghost_velocity is not None:
+            ride.ghost_settings.velocity = request.ride_ghost_velocity
+            ride.ghost_settings.velocity_min, ride.ghost_settings.velocity_max = ride.ghost_settings.velocity_bounds()
+        if request.ride_ghost_placement is not None:
+            ride.ghost_settings.placement = request.ride_ghost_placement
     if ride.velocity_max < ride.velocity_min:
         raise HTTPException(status_code=400, detail="Ride velocity max must be greater than or equal to min")
     hihat_open = instruments["hihat_open"]

@@ -1,3 +1,10 @@
+export type GhostSettingsPreset = {
+  enabled: boolean;
+  density: number;
+  velocity: number;
+  placement: "before" | "after" | "both";
+};
+
 export type Preset = {
   id: string;
   label: string;
@@ -28,6 +35,7 @@ export type Preset = {
     timing_feel: "neutral" | "push" | "drag" | "random";
     velocity_min: number;
     velocity_max: number;
+    ghost_settings: GhostSettingsPreset | null;
   };
   hihat_closed: {
     enabled: boolean;
@@ -36,6 +44,7 @@ export type Preset = {
     timing_feel: "neutral" | "push" | "drag" | "random";
     velocity_min: number;
     velocity_max: number;
+    ghost_settings: GhostSettingsPreset | null;
   };
   ride: {
     enabled: boolean;
@@ -44,6 +53,7 @@ export type Preset = {
     timing_feel: "neutral" | "push" | "drag" | "random";
     velocity_min: number;
     velocity_max: number;
+    ghost_settings: GhostSettingsPreset | null;
   };
   hihat_open: {
     enabled: boolean;
@@ -90,18 +100,30 @@ export type GenerateMidiInput = {
   snare_timing_feel?: "neutral" | "push" | "drag" | "random";
   snare_velocity_min?: number;
   snare_velocity_max?: number;
+  snare_ghost_enabled?: boolean;
+  snare_ghost_density?: number;
+  snare_ghost_velocity?: number;
+  snare_ghost_placement?: "before" | "after" | "both";
   hihat_closed_enabled?: boolean;
   hihat_closed_division?: "quarter" | "eighth" | "sixteenth";
   hihat_closed_space?: number;
   hihat_closed_timing_feel?: "neutral" | "push" | "drag" | "random";
   hihat_closed_velocity_min?: number;
   hihat_closed_velocity_max?: number;
+  hihat_closed_ghost_enabled?: boolean;
+  hihat_closed_ghost_density?: number;
+  hihat_closed_ghost_velocity?: number;
+  hihat_closed_ghost_placement?: "before" | "after" | "both";
   ride_enabled?: boolean;
   ride_division?: "quarter" | "eighth" | "sixteenth";
   ride_space?: number;
   ride_timing_feel?: "neutral" | "push" | "drag" | "random";
   ride_velocity_min?: number;
   ride_velocity_max?: number;
+  ride_ghost_enabled?: boolean;
+  ride_ghost_density?: number;
+  ride_ghost_velocity?: number;
+  ride_ghost_placement?: "before" | "after" | "both";
   hihat_open_enabled?: boolean;
   hihat_open_density?: number;
   hihat_open_velocity_min?: number;

@@ -139,6 +139,27 @@ select {
   gap: 14px;
 }
 
+.ghost-card {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+  padding: 16px;
+  border-radius: 16px;
+  background: #f6f9fe;
+  border: 1px solid #d7e2f1;
+}
+
+.ghost-card-head h4 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+
+.ghost-card-head p {
+  margin: 0;
+  color: #5e6d89;
+  font-size: 0.9rem;
+}
+
 .instrument-head {
   margin-bottom: 18px;
 }

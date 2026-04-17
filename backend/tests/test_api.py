@@ -30,6 +30,9 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(items[0]["settings"]["fill_intensity"], "off")
         self.assertEqual(items[0]["kick"]["syncopation"], 1)
         self.assertEqual(items[0]["snare"]["syncopation"], 1)
+        self.assertIn("ghost_settings", items[0]["snare"])
+        self.assertIn("ghost_settings", items[0]["hihat_closed"])
+        self.assertIn("ghost_settings", items[0]["ride"])
         self.assertEqual(items[0]["hihat_closed"]["division"], "sixteenth")
         self.assertEqual(items[0]["ride"]["division"], "eighth")
         self.assertIn("hihat_open", items[0])
@@ -308,6 +311,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(snare.velocity_min, 74)
         self.assertEqual(snare.velocity_max, 109)
 
+    def test_generate_passes_snare_ghost_overrides_to_instruments(self) -> None:
+        captured = {}
+        real_generate = generate.__globals__["generator"].generate
+
+        def fake_generate(settings, instruments):
+            captured["snare"] = instruments["snare"]
+            return real_generate(settings, instruments)
+
+        with patch("api.generator.generate", side_effect=fake_generate):
+            response = generate(
+                GenerateRequest(
+                    bpm=120,
+                    snare_ghost_enabled=False,
+                    snare_ghost_density=0.41,
+                    snare_ghost_velocity=39,
+                    snare_ghost_placement="after",
+                )
+            )
+
+        self.addCleanup(_delete_file, response.path)
+        ghost = captured["snare"].ghost_settings
+        self.assertIsNotNone(ghost)
+        self.assertFalse(ghost.enabled)
+        self.assertEqual(ghost.density, 0.41)
+        self.assertEqual(ghost.velocity, 39)
+        self.assertEqual(ghost.placement, "after")
+
     def test_generate_passes_hihat_closed_overrides_to_instruments(self) -> None:
         captured = {}
         real_generate = generate.__globals__["generator"].generate
@@ -338,6 +368,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(hihat_closed.velocity_min, 55)
         self.assertEqual(hihat_closed.velocity_max, 88)
 
+    def test_generate_passes_hihat_closed_ghost_overrides_to_instruments(self) -> None:
+        captured = {}
+        real_generate = generate.__globals__["generator"].generate
+
+        def fake_generate(settings, instruments):
+            captured["hihat_closed"] = instruments["hihat_closed"]
+            return real_generate(settings, instruments)
+
+        with patch("api.generator.generate", side_effect=fake_generate):
+            response = generate(
+                GenerateRequest(
+                    bpm=120,
+                    hihat_closed_ghost_enabled=False,
+                    hihat_closed_ghost_density=0.24,
+                    hihat_closed_ghost_velocity=31,
+                    hihat_closed_ghost_placement="both",
+                )
+            )
+
+        self.addCleanup(_delete_file, response.path)
+        ghost = captured["hihat_closed"].ghost_settings
+        self.assertIsNotNone(ghost)
+        self.assertFalse(ghost.enabled)
+        self.assertEqual(ghost.density, 0.24)
+        self.assertEqual(ghost.velocity, 31)
+        self.assertEqual(ghost.placement, "both")
+
     def test_generate_passes_ride_overrides_to_instruments(self) -> None:
         captured = {}
         real_generate = generate.__globals__["generator"].generate
@@ -367,6 +424,33 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(ride.timing_feel, "push")
         self.assertEqual(ride.velocity_min, 58)
         self.assertEqual(ride.velocity_max, 90)
+
+    def test_generate_passes_ride_ghost_overrides_to_instruments(self) -> None:
+        captured = {}
+        real_generate = generate.__globals__["generator"].generate
+
+        def fake_generate(settings, instruments):
+            captured["ride"] = instruments["ride"]
+            return real_generate(settings, instruments)
+
+        with patch("api.generator.generate", side_effect=fake_generate):
+            response = generate(
+                GenerateRequest(
+                    bpm=120,
+                    ride_ghost_enabled=False,
+                    ride_ghost_density=0.19,
+                    ride_ghost_velocity=35,
+                    ride_ghost_placement="before",
+                )
+            )
+
+        self.addCleanup(_delete_file, response.path)
+        ghost = captured["ride"].ghost_settings
+        self.assertIsNotNone(ghost)
+        self.assertFalse(ghost.enabled)
+        self.assertEqual(ghost.density, 0.19)
+        self.assertEqual(ghost.velocity, 35)
+        self.assertEqual(ghost.placement, "before")
 
     def test_generate_passes_hihat_open_overrides_to_instruments(self) -> None:
         captured = {}

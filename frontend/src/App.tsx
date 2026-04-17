@@ -33,6 +33,12 @@ const DEFAULT_SNARE = {
   timingFeel: "neutral" as const,
   velocityMin: 78,
   velocityMax: 114,
+  ghost: {
+    enabled: true,
+    density: 0.28,
+    velocity: 33,
+    placement: "both" as const,
+  },
 };
 
 const DEFAULT_HIHAT_CLOSED = {
@@ -42,6 +48,12 @@ const DEFAULT_HIHAT_CLOSED = {
   timingFeel: "neutral" as const,
   velocityMin: 62,
   velocityMax: 92,
+  ghost: {
+    enabled: true,
+    density: 0.18,
+    velocity: 27,
+    placement: "after" as const,
+  },
 };
 
 const DEFAULT_RIDE = {
@@ -51,6 +63,12 @@ const DEFAULT_RIDE = {
   timingFeel: "neutral" as const,
   velocityMin: 66,
   velocityMax: 94,
+  ghost: {
+    enabled: true,
+    density: 0.12,
+    velocity: 29,
+    placement: "after" as const,
+  },
 };
 
 const DEFAULT_HIHAT_OPEN = {
@@ -95,6 +113,12 @@ const DIVISION_OPTIONS = [
   { value: "quarter", label: "Quarter" },
   { value: "eighth", label: "Eighth" },
   { value: "sixteenth", label: "Sixteenth" },
+] as const;
+
+const GHOST_PLACEMENT_OPTIONS = [
+  { value: "before", label: "Before" },
+  { value: "after", label: "After" },
+  { value: "both", label: "Both" },
 ] as const;
 
 const INSTRUMENT_LABELS: Record<string, string> = {
@@ -231,6 +255,12 @@ function App() {
   );
   const [snareVelocityMin, setSnareVelocityMin] = useState(DEFAULT_SNARE.velocityMin);
   const [snareVelocityMax, setSnareVelocityMax] = useState(DEFAULT_SNARE.velocityMax);
+  const [snareGhostEnabled, setSnareGhostEnabled] = useState(DEFAULT_SNARE.ghost.enabled);
+  const [snareGhostDensity, setSnareGhostDensity] = useState(DEFAULT_SNARE.ghost.density);
+  const [snareGhostVelocity, setSnareGhostVelocity] = useState(DEFAULT_SNARE.ghost.velocity);
+  const [snareGhostPlacement, setSnareGhostPlacement] = useState<(typeof GHOST_PLACEMENT_OPTIONS)[number]["value"]>(
+    DEFAULT_SNARE.ghost.placement,
+  );
   const [hihatClosedEnabled, setHihatClosedEnabled] = useState(DEFAULT_HIHAT_CLOSED.enabled);
   const [hihatClosedDivision, setHihatClosedDivision] = useState<(typeof DIVISION_OPTIONS)[number]["value"]>(
     DEFAULT_HIHAT_CLOSED.division,
@@ -241,6 +271,12 @@ function App() {
   );
   const [hihatClosedVelocityMin, setHihatClosedVelocityMin] = useState(DEFAULT_HIHAT_CLOSED.velocityMin);
   const [hihatClosedVelocityMax, setHihatClosedVelocityMax] = useState(DEFAULT_HIHAT_CLOSED.velocityMax);
+  const [hihatClosedGhostEnabled, setHihatClosedGhostEnabled] = useState(DEFAULT_HIHAT_CLOSED.ghost.enabled);
+  const [hihatClosedGhostDensity, setHihatClosedGhostDensity] = useState(DEFAULT_HIHAT_CLOSED.ghost.density);
+  const [hihatClosedGhostVelocity, setHihatClosedGhostVelocity] = useState(DEFAULT_HIHAT_CLOSED.ghost.velocity);
+  const [hihatClosedGhostPlacement, setHihatClosedGhostPlacement] = useState<
+    (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"]
+  >(DEFAULT_HIHAT_CLOSED.ghost.placement);
   const [rideEnabled, setRideEnabled] = useState(DEFAULT_RIDE.enabled);
   const [rideDivision, setRideDivision] = useState<(typeof DIVISION_OPTIONS)[number]["value"]>(
     DEFAULT_RIDE.division,
@@ -251,6 +287,12 @@ function App() {
   );
   const [rideVelocityMin, setRideVelocityMin] = useState(DEFAULT_RIDE.velocityMin);
   const [rideVelocityMax, setRideVelocityMax] = useState(DEFAULT_RIDE.velocityMax);
+  const [rideGhostEnabled, setRideGhostEnabled] = useState(DEFAULT_RIDE.ghost.enabled);
+  const [rideGhostDensity, setRideGhostDensity] = useState(DEFAULT_RIDE.ghost.density);
+  const [rideGhostVelocity, setRideGhostVelocity] = useState(DEFAULT_RIDE.ghost.velocity);
+  const [rideGhostPlacement, setRideGhostPlacement] = useState<(typeof GHOST_PLACEMENT_OPTIONS)[number]["value"]>(
+    DEFAULT_RIDE.ghost.placement,
+  );
   const [hihatOpenEnabled, setHihatOpenEnabled] = useState(DEFAULT_HIHAT_OPEN.enabled);
   const [hihatOpenDensity, setHihatOpenDensity] = useState(DEFAULT_HIHAT_OPEN.density);
   const [hihatOpenVelocityMin, setHihatOpenVelocityMin] = useState(DEFAULT_HIHAT_OPEN.velocityMin);
@@ -386,18 +428,34 @@ function App() {
     setSnareTimingFeel(preset.snare.timing_feel);
     setSnareVelocityMin(preset.snare.velocity_min);
     setSnareVelocityMax(preset.snare.velocity_max);
+    setSnareGhostEnabled(preset.snare.ghost_settings?.enabled ?? DEFAULT_SNARE.ghost.enabled);
+    setSnareGhostDensity(preset.snare.ghost_settings?.density ?? DEFAULT_SNARE.ghost.density);
+    setSnareGhostVelocity(preset.snare.ghost_settings?.velocity ?? DEFAULT_SNARE.ghost.velocity);
+    setSnareGhostPlacement(preset.snare.ghost_settings?.placement ?? DEFAULT_SNARE.ghost.placement);
     setHihatClosedEnabled(preset.hihat_closed.enabled);
     setHihatClosedDivision(preset.hihat_closed.division);
     setHihatClosedSpace(preset.hihat_closed.space);
     setHihatClosedTimingFeel(preset.hihat_closed.timing_feel);
     setHihatClosedVelocityMin(preset.hihat_closed.velocity_min);
     setHihatClosedVelocityMax(preset.hihat_closed.velocity_max);
+    setHihatClosedGhostEnabled(preset.hihat_closed.ghost_settings?.enabled ?? DEFAULT_HIHAT_CLOSED.ghost.enabled);
+    setHihatClosedGhostDensity(preset.hihat_closed.ghost_settings?.density ?? DEFAULT_HIHAT_CLOSED.ghost.density);
+    setHihatClosedGhostVelocity(
+      preset.hihat_closed.ghost_settings?.velocity ?? DEFAULT_HIHAT_CLOSED.ghost.velocity,
+    );
+    setHihatClosedGhostPlacement(
+      preset.hihat_closed.ghost_settings?.placement ?? DEFAULT_HIHAT_CLOSED.ghost.placement,
+    );
     setRideEnabled(preset.ride.enabled);
     setRideDivision(preset.ride.division);
     setRideSpace(preset.ride.space);
     setRideTimingFeel(preset.ride.timing_feel);
     setRideVelocityMin(preset.ride.velocity_min);
     setRideVelocityMax(preset.ride.velocity_max);
+    setRideGhostEnabled(preset.ride.ghost_settings?.enabled ?? DEFAULT_RIDE.ghost.enabled);
+    setRideGhostDensity(preset.ride.ghost_settings?.density ?? DEFAULT_RIDE.ghost.density);
+    setRideGhostVelocity(preset.ride.ghost_settings?.velocity ?? DEFAULT_RIDE.ghost.velocity);
+    setRideGhostPlacement(preset.ride.ghost_settings?.placement ?? DEFAULT_RIDE.ghost.placement);
     setHihatOpenEnabled(preset.hihat_open.enabled);
     setHihatOpenDensity(preset.hihat_open.density);
     setHihatOpenVelocityMin(preset.hihat_open.velocity_min);
@@ -485,18 +543,30 @@ function App() {
       snare_timing_feel: snareTimingFeel,
       snare_velocity_min: snareVelocityMin,
       snare_velocity_max: snareVelocityMax,
+      snare_ghost_enabled: snareGhostEnabled,
+      snare_ghost_density: snareGhostDensity,
+      snare_ghost_velocity: snareGhostVelocity,
+      snare_ghost_placement: snareGhostPlacement,
       hihat_closed_enabled: hihatClosedEnabled,
       hihat_closed_division: hihatClosedDivision,
       hihat_closed_space: hihatClosedSpace,
       hihat_closed_timing_feel: hihatClosedTimingFeel,
       hihat_closed_velocity_min: hihatClosedVelocityMin,
       hihat_closed_velocity_max: hihatClosedVelocityMax,
+      hihat_closed_ghost_enabled: hihatClosedGhostEnabled,
+      hihat_closed_ghost_density: hihatClosedGhostDensity,
+      hihat_closed_ghost_velocity: hihatClosedGhostVelocity,
+      hihat_closed_ghost_placement: hihatClosedGhostPlacement,
       ride_enabled: rideEnabled,
       ride_division: rideDivision,
       ride_space: rideSpace,
       ride_timing_feel: rideTimingFeel,
       ride_velocity_min: rideVelocityMin,
       ride_velocity_max: rideVelocityMax,
+      ride_ghost_enabled: rideGhostEnabled,
+      ride_ghost_density: rideGhostDensity,
+      ride_ghost_velocity: rideGhostVelocity,
+      ride_ghost_placement: rideGhostPlacement,
       hihat_open_enabled: hihatOpenEnabled,
       hihat_open_density: hihatOpenDensity,
       hihat_open_velocity_min: hihatOpenVelocityMin,
@@ -1097,6 +1167,74 @@ function App() {
                       </label>
                     </div>
                   </div>
+
+                  <div className="ghost-card">
+                    <div className="ghost-card-head">
+                      <h4>Ghost</h4>
+                      <p>Secondary snare notes, aligned with the desktop behavior.</p>
+                    </div>
+
+                    <label className="field-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={snareGhostEnabled}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setSnareGhostEnabled(event.target.checked);
+                        }}
+                      />
+                      <span>Enabled</span>
+                    </label>
+
+                    <label className="field">
+                      <span>Density</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={snareGhostDensity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setSnareGhostDensity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Velocity</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={127}
+                        step={1}
+                        value={snareGhostVelocity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setSnareGhostVelocity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Placement</span>
+                      <select
+                        value={snareGhostPlacement}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setSnareGhostPlacement(
+                            event.target.value as (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"],
+                          );
+                        }}
+                      >
+                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
               </section>
 
@@ -1202,6 +1340,74 @@ function App() {
                       </label>
                     </div>
                   </div>
+
+                  <div className="ghost-card">
+                    <div className="ghost-card-head">
+                      <h4>Ghost</h4>
+                      <p>Subtle pulse notes around the main closed-hat anchors.</p>
+                    </div>
+
+                    <label className="field-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={hihatClosedGhostEnabled}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setHihatClosedGhostEnabled(event.target.checked);
+                        }}
+                      />
+                      <span>Enabled</span>
+                    </label>
+
+                    <label className="field">
+                      <span>Density</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={hihatClosedGhostDensity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setHihatClosedGhostDensity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Velocity</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={127}
+                        step={1}
+                        value={hihatClosedGhostVelocity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setHihatClosedGhostVelocity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Placement</span>
+                      <select
+                        value={hihatClosedGhostPlacement}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setHihatClosedGhostPlacement(
+                            event.target.value as (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"],
+                          );
+                        }}
+                      >
+                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </div>
               </section>
 
@@ -1306,6 +1512,74 @@ function App() {
                         />
                       </label>
                     </div>
+                  </div>
+
+                  <div className="ghost-card">
+                    <div className="ghost-card-head">
+                      <h4>Ghost</h4>
+                      <p>Low-velocity ride taps, matching the Python desktop controls.</p>
+                    </div>
+
+                    <label className="field-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={rideGhostEnabled}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setRideGhostEnabled(event.target.checked);
+                        }}
+                      />
+                      <span>Enabled</span>
+                    </label>
+
+                    <label className="field">
+                      <span>Density</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={rideGhostDensity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setRideGhostDensity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Velocity</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={127}
+                        step={1}
+                        value={rideGhostVelocity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setRideGhostVelocity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Placement</span>
+                      <select
+                        value={rideGhostPlacement}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setRideGhostPlacement(
+                            event.target.value as (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"],
+                          );
+                        }}
+                      >
+                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
                   </div>
                 </div>
               </section>
