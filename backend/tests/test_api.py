@@ -7,12 +7,14 @@ from mido import MidiFile, bpm2tempo
 from api import (
     GenerateRequest,
     PatternCellRequest,
+    PatternGenerateGhostsRequest,
     PatternMoveRequest,
     PatternPayloadRequest,
     _delete_file,
     add_base_hit,
     export_midi,
     generate,
+    generate_ghosts,
     generate_pattern,
     move_hit,
     presets,
@@ -130,6 +132,64 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(target["length_ticks"], original["length_ticks"])
         self.assertEqual(target["source"], original["source"])
 
+    def test_generate_ghosts_regenerates_only_ghost_hits_for_current_pattern(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
+        pattern_request = PatternPayloadRequest(**payload)
+        updated = generate_ghosts(
+            PatternGenerateGhostsRequest(
+                pattern=pattern_request,
+                snare_enabled=True,
+                snare_ghost_enabled=True,
+                snare_ghost_density=0.9,
+                snare_ghost_velocity=36,
+                snare_ghost_placement="both",
+                hihat_closed_enabled=True,
+                hihat_closed_division="sixteenth",
+                hihat_closed_ghost_enabled=True,
+                hihat_closed_ghost_density=0.6,
+                hihat_closed_ghost_velocity=28,
+                hihat_closed_ghost_placement="after",
+                ride_enabled=True,
+                ride_division="eighth",
+                ride_ghost_enabled=True,
+                ride_ghost_density=0.4,
+                ride_ghost_velocity=30,
+                ride_ghost_placement="after",
+            )
+        )
+
+        for instrument in updated["instrument_order"]:
+            original_base = sorted(
+                (
+                    event["bar"],
+                    event["slot"],
+                    event["hit_type"],
+                    event["velocity"],
+                    event["offset"],
+                    event["length_ticks"],
+                    event["source"],
+                )
+                for event in payload["events"][instrument]
+                if event["hit_type"] != "ghost"
+            )
+            regenerated_base = sorted(
+                (
+                    event["bar"],
+                    event["slot"],
+                    event["hit_type"],
+                    event["velocity"],
+                    event["offset"],
+                    event["length_ticks"],
+                    event["source"],
+                )
+                for event in updated["events"][instrument]
+                if event["hit_type"] != "ghost"
+            )
+            self.assertEqual(regenerated_base, original_base)
+
+        ghost_count = sum(1 for events in updated["events"].values() for event in events if event["hit_type"] == "ghost")
+        self.assertGreater(ghost_count, 0)
+
     def test_export_midi_uses_pattern_payload(self) -> None:
         payload = generate_pattern(GenerateRequest(bpm=120, grouping="3+2"))
         payload["events"]["kick"] = [
@@ -154,6 +214,19 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(time_signatures)
         self.assertEqual(time_signatures[0].numerator, 5)
         self.assertEqual(note_on_messages[0].velocity, 111)
+
+    def test_export_midi_uses_bpm_override_when_provided(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120))
+        payload["bpm_override"] = 150
+
+        response = export_midi(PatternPayloadRequest(**payload))
+        self.addCleanup(_delete_file, response.path)
+
+        midi = MidiFile(response.path)
+        tempo_messages = [message for track in midi.tracks for message in track if message.type == "set_tempo"]
+
+        self.assertTrue(tempo_messages)
+        self.assertEqual(tempo_messages[0].tempo, bpm2tempo(150))
 
     def test_export_midi_rejects_mismatched_slots_per_bar(self) -> None:
         payload = generate_pattern(GenerateRequest(bpm=120))

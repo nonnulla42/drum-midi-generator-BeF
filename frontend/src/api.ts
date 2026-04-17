@@ -151,6 +151,7 @@ export type PatternEvent = {
 
 export type GeneratedPattern = {
   pattern_version: number;
+  bpm_override?: number;
   meta: {
     bpm: number;
     bars: number;
@@ -226,13 +227,20 @@ export async function generatePattern(input: GenerateMidiInput): Promise<Generat
   return response.json() as Promise<GeneratedPattern>;
 }
 
-export async function exportPatternMidi(pattern: GeneratedPattern): Promise<Blob> {
+export async function exportPatternMidi(pattern: GeneratedPattern, bpmOverride?: number): Promise<Blob> {
   const response = await fetch(`${API_BASE_URL}/export-midi`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(pattern),
+    body: JSON.stringify(
+      bpmOverride === undefined
+        ? pattern
+        : {
+            ...pattern,
+            bpm_override: bpmOverride,
+          },
+    ),
   });
 
   if (!response.ok) {
@@ -257,6 +265,27 @@ type PatternMoveEditInput = {
   to_bar: number;
   to_slot: number;
   hit_type: "main" | "accent" | "ghost";
+};
+
+type PatternGenerateGhostsInput = {
+  pattern: GeneratedPattern;
+  snare_enabled: boolean;
+  snare_ghost_enabled: boolean;
+  snare_ghost_density: number;
+  snare_ghost_velocity: number;
+  snare_ghost_placement: "before" | "after" | "both";
+  hihat_closed_enabled: boolean;
+  hihat_closed_division: "quarter" | "eighth" | "sixteenth";
+  hihat_closed_ghost_enabled: boolean;
+  hihat_closed_ghost_density: number;
+  hihat_closed_ghost_velocity: number;
+  hihat_closed_ghost_placement: "before" | "after" | "both";
+  ride_enabled: boolean;
+  ride_division: "quarter" | "eighth" | "sixteenth";
+  ride_ghost_enabled: boolean;
+  ride_ghost_density: number;
+  ride_ghost_velocity: number;
+  ride_ghost_placement: "before" | "after" | "both";
 };
 
 async function postPatternEdit<TInput>(path: string, input: TInput): Promise<GeneratedPattern> {
@@ -285,4 +314,8 @@ export function removePatternHit(input: PatternCellEditInput): Promise<Generated
 
 export function movePatternHit(input: PatternMoveEditInput): Promise<GeneratedPattern> {
   return postPatternEdit("/pattern/move-hit", input);
+}
+
+export function generatePatternGhosts(input: PatternGenerateGhostsInput): Promise<GeneratedPattern> {
+  return postPatternEdit("/pattern/generate-ghosts", input);
 }

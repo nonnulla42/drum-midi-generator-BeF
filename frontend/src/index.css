@@ -35,11 +35,11 @@ select {
 }
 
 .app-layout {
-  width: min(100%, 1280px);
+  width: min(100%, 1440px);
   margin: 0 auto;
   display: grid;
   grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
-  gap: 24px;
+  gap: 28px;
   align-items: start;
 }
 
@@ -52,7 +52,9 @@ select {
 }
 
 .sidebar {
-  padding: 32px;
+  position: sticky;
+  top: 24px;
+  padding: 28px;
 }
 
 .sidebar-form {
@@ -84,49 +86,86 @@ select {
 
 .workspace {
   display: grid;
-  gap: 16px;
-}
-
-.workspace-panels {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 300px);
-  gap: 16px;
-  align-items: start;
+  gap: 22px;
 }
 
 .workspace-header {
-  padding: 8px 4px 0;
+  padding: 8px 6px 0;
 }
 
-.instrument-strip {
+.instrument-bands {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(280px, 320px);
-  gap: 16px;
-  overflow-x: auto;
-  padding-bottom: 8px;
+  gap: 18px;
 }
 
-.special-column {
+.section-card {
   display: grid;
-  gap: 16px;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 18px;
+  background: #f8fbff;
+  border: 1px solid #dbe5f2;
 }
 
-.special-column-header {
-  padding: 8px 4px 0;
+.section-card-head h2,
+.band-header h3 {
+  margin: 0 0 6px;
 }
 
-.special-column-header h3 {
-  margin: 0 0 8px;
-}
-
-.special-column-header p {
+.section-card-head p,
+.band-header p {
   margin: 0;
   color: #53627f;
+  font-size: 0.94rem;
+}
+
+.section-card-status {
+  gap: 16px;
+}
+
+.toggle-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.band-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid #d8e1ef;
+  box-shadow: 0 20px 50px rgba(25, 42, 79, 0.08);
+}
+
+.band-card-backbone {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(242, 247, 255, 0.92) 100%);
+}
+
+.band-card-pulse {
+  background: linear-gradient(180deg, rgba(248, 252, 255, 0.98) 0%, rgba(238, 248, 255, 0.92) 100%);
+}
+
+.band-card-accents {
+  background: linear-gradient(180deg, rgba(255, 251, 247, 0.98) 0%, rgba(255, 245, 236, 0.92) 100%);
+}
+
+.band-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.band-grid-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.band-grid-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .instrument-card {
   padding: 24px;
+  height: 100%;
 }
 
 .instrument-card-compact {
@@ -274,7 +313,7 @@ select {
 
 .playback-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -313,7 +352,7 @@ button:disabled {
 }
 
 .pattern-grid-card {
-  padding: 24px;
+  padding: 26px;
 }
 
 .pattern-grid-head {
@@ -453,13 +492,14 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .workspace-panels {
-    grid-template-columns: 1fr;
+  .sidebar {
+    position: static;
   }
 
-  .instrument-strip {
-    grid-auto-flow: row;
-    grid-auto-columns: auto;
+  .band-grid-2,
+  .band-grid-3,
+  .toggle-row {
+    grid-template-columns: 1fr;
   }
 
   .pattern-row {
@@ -481,7 +521,8 @@ button:disabled {
   .inline-fields,
   .range-fields,
   .playback-actions,
-  .segmented-control {
+  .segmented-control,
+  .toggle-row {
     grid-template-columns: 1fr;
   }
 }

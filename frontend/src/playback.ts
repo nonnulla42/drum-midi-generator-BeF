@@ -175,9 +175,10 @@ export class PatternPlayer {
   private loopDurationMs = 0;
   private loopEnabled = false;
   private currentPattern: GeneratedPattern | null = null;
+  private currentBpmOverride: number | null = null;
   private isPlaying = false;
 
-  async play(pattern: GeneratedPattern, loopEnabled: boolean): Promise<void> {
+  async play(pattern: GeneratedPattern, loopEnabled: boolean, bpmOverride?: number): Promise<void> {
     const context = this.ensureAudioContext();
     if (context.state === "suspended") {
       await context.resume();
@@ -185,19 +186,20 @@ export class PatternPlayer {
 
     this.stop();
     this.currentPattern = pattern;
+    this.currentBpmOverride = bpmOverride ?? null;
     this.loopEnabled = loopEnabled;
-    this.events = await this.buildSchedule(pattern);
-    this.loopDurationMs = this.patternDurationMs(pattern);
+    this.events = await this.buildSchedule(pattern, this.currentBpmOverride ?? undefined);
+    this.loopDurationMs = this.patternDurationMs(pattern, this.currentBpmOverride ?? undefined);
     this.startTimestamp = performance.now();
     this.isPlaying = true;
     this.schedulePlayback();
   }
 
-  async restart(): Promise<void> {
+  async restart(bpmOverride?: number): Promise<void> {
     if (!this.currentPattern) {
       throw new Error("Generate a pattern before restarting playback.");
     }
-    await this.play(this.currentPattern, this.loopEnabled);
+    await this.play(this.currentPattern, this.loopEnabled, bpmOverride ?? this.currentBpmOverride ?? undefined);
   }
 
   stop(): void {
@@ -266,8 +268,9 @@ export class PatternPlayer {
     return buffer;
   }
 
-  private async buildSchedule(pattern: GeneratedPattern): Promise<ScheduledEvent[]> {
+  private async buildSchedule(pattern: GeneratedPattern, bpmOverride?: number): Promise<ScheduledEvent[]> {
     const scheduledEvents: ScheduledEvent[] = [];
+    const playbackBpm = bpmOverride ?? pattern.meta.bpm;
 
     for (const instrument of pattern.instrument_order) {
       for (const event of pattern.events[instrument] ?? []) {
@@ -279,7 +282,7 @@ export class PatternPlayer {
         const absoluteSlot = event.bar * pattern.meta.slots_per_bar + event.slot;
         const startTick = slotToTicks(absoluteSlot, pattern.meta.swing) + event.offset;
         scheduledEvents.push({
-          timeMs: Math.max(0, ticksToMilliseconds(startTick, pattern.meta.bpm)),
+          timeMs: Math.max(0, ticksToMilliseconds(startTick, playbackBpm)),
           instrument,
           hitType: event.hit_type,
           velocity: event.velocity,
@@ -291,10 +294,10 @@ export class PatternPlayer {
     return scheduledEvents.sort((left, right) => left.timeMs - right.timeMs);
   }
 
-  private patternDurationMs(pattern: GeneratedPattern): number {
+  private patternDurationMs(pattern: GeneratedPattern, bpmOverride?: number): number {
     const totalSlots = pattern.meta.slots_per_bar * pattern.meta.bars;
     const endTick = slotToTicks(totalSlots, pattern.meta.swing);
-    return Math.max(1, ticksToMilliseconds(endTick, pattern.meta.bpm));
+    return Math.max(1, ticksToMilliseconds(endTick, bpmOverride ?? pattern.meta.bpm));
   }
 
   private schedulePlayback(): void {

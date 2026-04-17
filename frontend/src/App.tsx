@@ -5,6 +5,7 @@ import {
   exportPatternMidi,
   fetchPresets,
   generateMidi,
+  generatePatternGhosts,
   generatePattern,
   movePatternHit,
   removePatternHit,
@@ -310,6 +311,7 @@ function App() {
   const [isLoadingPresets, setIsLoadingPresets] = useState(true);
   const [isGeneratingPattern, setIsGeneratingPattern] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingGhosts, setIsGeneratingGhosts] = useState(false);
   const [isEditingPattern, setIsEditingPattern] = useState(false);
   const [isEditGridEnabled, setIsEditGridEnabled] = useState(true);
   const [isLoopEnabled, setIsLoopEnabled] = useState(true);
@@ -383,6 +385,16 @@ function App() {
       patternPlayerRef.current?.stop();
     };
   }, []);
+
+  useEffect(() => {
+    if (playbackStatus !== "Playing" || !pattern) {
+      return;
+    }
+
+    void getPatternPlayer().restart(bpm).catch(() => {
+      setPlaybackStatus("Stopped");
+    });
+  }, [bpm, pattern, playbackStatus]);
 
   function getPatternPlayer() {
     if (!patternPlayerRef.current) {
@@ -681,7 +693,7 @@ function App() {
     setIsGenerating(true);
 
     try {
-      const blob = pattern ? await exportPatternMidi(pattern) : await generateMidi(buildRequest());
+      const blob = pattern ? await exportPatternMidi(pattern, bpm) : await generateMidi(buildRequest());
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -697,6 +709,45 @@ function App() {
     }
   }
 
+  async function handleGenerateGhosts() {
+    if (!pattern) {
+      setGenerateError("Generate a pattern before generating ghosts.");
+      return;
+    }
+
+    setGenerateError("");
+    setIsGeneratingGhosts(true);
+
+    try {
+      stopPlaybackStatefully();
+      const nextPattern = await generatePatternGhosts({
+        pattern,
+        snare_enabled: snareEnabled,
+        snare_ghost_enabled: snareGhostEnabled,
+        snare_ghost_density: snareGhostDensity,
+        snare_ghost_velocity: snareGhostVelocity,
+        snare_ghost_placement: snareGhostPlacement,
+        hihat_closed_enabled: hihatClosedEnabled,
+        hihat_closed_division: hihatClosedDivision,
+        hihat_closed_ghost_enabled: hihatClosedGhostEnabled,
+        hihat_closed_ghost_density: hihatClosedGhostDensity,
+        hihat_closed_ghost_velocity: hihatClosedGhostVelocity,
+        hihat_closed_ghost_placement: hihatClosedGhostPlacement,
+        ride_enabled: rideEnabled,
+        ride_division: rideDivision,
+        ride_ghost_enabled: rideGhostEnabled,
+        ride_ghost_density: rideGhostDensity,
+        ride_ghost_velocity: rideGhostVelocity,
+        ride_ghost_placement: rideGhostPlacement,
+      });
+      setPattern(nextPattern);
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Failed to generate ghost notes.");
+    } finally {
+      setIsGeneratingGhosts(false);
+    }
+  }
+
   async function handlePlay() {
     if (!pattern) {
       setGenerateError("Generate a pattern before playback.");
@@ -705,7 +756,7 @@ function App() {
 
     setGenerateError("");
     try {
-      await getPatternPlayer().play(pattern, isLoopEnabled);
+      await getPatternPlayer().play(pattern, isLoopEnabled, bpm);
       setPlaybackStatus("Playing");
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to start playback.");
@@ -725,7 +776,7 @@ function App() {
 
     setGenerateError("");
     try {
-      await getPatternPlayer().restart();
+      await getPatternPlayer().restart(bpm);
       setPlaybackStatus("Playing");
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to restart playback.");
@@ -743,79 +794,88 @@ function App() {
           </header>
 
           <div className="sidebar-form">
-            <label className="field">
-              <span>Preset</span>
-              <select
-                value={selectedPreset}
-                onChange={(event) => handlePresetChange(event.target.value)}
-                disabled={isLoadingPresets}
-              >
-                <option value={CUSTOM_PRESET_ID}>Custom</option>
-                {isLoadingPresets ? (
-                  <option>Loading presets...</option>
-                ) : presets.length > 0 ? (
-                  presets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.label}
+            <section className="section-card">
+              <div className="section-card-head">
+                <h2>Structure</h2>
+                <p>Define meter, grouping, preset, and overall form before shaping individual instruments.</p>
+              </div>
+
+              <label className="field">
+                <span>Preset</span>
+                <select
+                  value={selectedPreset}
+                  onChange={(event) => handlePresetChange(event.target.value)}
+                  disabled={isLoadingPresets}
+                >
+                  <option value={CUSTOM_PRESET_ID}>Custom</option>
+                  {isLoadingPresets ? (
+                    <option>Loading presets...</option>
+                  ) : presets.length > 0 ? (
+                    presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))
+                  ) : (
+                    <option>No presets available</option>
+                  )}
+                </select>
+              </label>
+
+              <label className="field">
+                <span>BPM</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={bpm}
+                  onChange={(event) => {
+                    setBpm(Number(event.target.value));
+                  }}
+                />
+              </label>
+
+              <label className="field">
+                <span>Pattern Length</span>
+                <select
+                  value={bars}
+                  onChange={(event) => {
+                    switchToCustomIfNeeded();
+                    setBars(Number(event.target.value));
+                  }}
+                >
+                  {[1, 2, 4, 8].map((value) => (
+                    <option key={value} value={value}>
+                      {value}
                     </option>
-                  ))
-                ) : (
-                  <option>No presets available</option>
-                )}
-              </select>
-            </label>
+                  ))}
+                </select>
+              </label>
 
-            <label className="field">
-              <span>BPM</span>
-              <input
-                type="number"
-                min={1}
-                step={1}
-                value={bpm}
-                onChange={(event) => {
-                  switchToCustomIfNeeded();
-                  setBpm(Number(event.target.value));
-                }}
-              />
-            </label>
+              <label className="field">
+                <span>Beat Grouping</span>
+                <input
+                  type="text"
+                  value={grouping}
+                  onChange={(event) => {
+                    switchToCustomIfNeeded();
+                    setGrouping(event.target.value);
+                  }}
+                  placeholder="4 or 3+2"
+                />
+              </label>
 
-            <label className="field">
-              <span>Pattern Length</span>
-              <select
-                value={bars}
-                onChange={(event) => {
-                  switchToCustomIfNeeded();
-                  setBars(Number(event.target.value));
-                }}
-              >
-                {[1, 2, 4, 8].map((value) => (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <label className="field">
+                <span>Time Signature</span>
+                <input type="text" value={timeSignature} readOnly />
+              </label>
+            </section>
 
-            <label className="field">
-              <span>Beat Grouping</span>
-              <input
-                type="text"
-                value={grouping}
-                onChange={(event) => {
-                  switchToCustomIfNeeded();
-                  setGrouping(event.target.value);
-                }}
-                placeholder="4 or 3+2"
-              />
-            </label>
-
-            <label className="field">
-              <span>Time Signature</span>
-              <input type="text" value={timeSignature} readOnly />
-            </label>
-
-            <div className="section">
-              <h2>Humanization</h2>
+            <section className="section-card">
+              <div className="section-card-head">
+                <h2>Humanization</h2>
+                <p>Shape feel and repetition without changing the core groove logic.</p>
+              </div>
 
               <label className="field">
                 <span>Swing</span>
@@ -876,10 +936,13 @@ function App() {
                   }}
                 />
               </label>
-            </div>
+            </section>
 
-            <div className="section">
-              <h2>Fill</h2>
+            <section className="section-card">
+              <div className="section-card-head">
+                <h2>Fill</h2>
+                <p>Control how often fills appear and how far they stretch the phrase.</p>
+              </div>
 
               <div className="inline-fields">
                 <label className="field">
@@ -935,28 +998,86 @@ function App() {
                   </select>
                 </label>
               </div>
-            </div>
+            </section>
 
-            {loadError ? <p className="message error">{loadError}</p> : null}
-            {currentGroupingError ? <p className="message error">{currentGroupingError}</p> : null}
-            {kickVelocityError ? <p className="message error">{kickVelocityError}</p> : null}
-            {snareVelocityError ? <p className="message error">{snareVelocityError}</p> : null}
-            {hihatClosedVelocityError ? <p className="message error">{hihatClosedVelocityError}</p> : null}
-            {rideVelocityError ? <p className="message error">{rideVelocityError}</p> : null}
-            {hihatOpenVelocityError ? <p className="message error">{hihatOpenVelocityError}</p> : null}
-            {crashVelocityError ? <p className="message error">{crashVelocityError}</p> : null}
-            {tomsVelocityError ? <p className="message error">{tomsVelocityError}</p> : null}
-            {generateError ? <p className="message error">{generateError}</p> : null}
+            <section className="section-card section-card-status">
+              <div className="section-card-head">
+                <h2>Playback & Actions</h2>
+                <p>Generate, preview, export, and toggle edit mode from one stable control area.</p>
+              </div>
 
-            <div className="action-group">
-              <div className="section">
-                <h2>Playback</h2>
+              {loadError ? <p className="message error">{loadError}</p> : null}
+              {currentGroupingError ? <p className="message error">{currentGroupingError}</p> : null}
+              {kickVelocityError ? <p className="message error">{kickVelocityError}</p> : null}
+              {snareVelocityError ? <p className="message error">{snareVelocityError}</p> : null}
+              {hihatClosedVelocityError ? <p className="message error">{hihatClosedVelocityError}</p> : null}
+              {rideVelocityError ? <p className="message error">{rideVelocityError}</p> : null}
+              {hihatOpenVelocityError ? <p className="message error">{hihatOpenVelocityError}</p> : null}
+              {crashVelocityError ? <p className="message error">{crashVelocityError}</p> : null}
+              {tomsVelocityError ? <p className="message error">{tomsVelocityError}</p> : null}
+              {generateError ? <p className="message error">{generateError}</p> : null}
 
+              <div className="action-group">
                 <div className="playback-actions">
+                  <button
+                    type="submit"
+                    disabled={
+                      isLoadingPresets ||
+                      isGeneratingPattern ||
+                      isGenerating ||
+                      isGeneratingGhosts ||
+                      isEditingPattern ||
+                      !selectedPreset ||
+                      Boolean(currentGroupingError) ||
+                      Boolean(kickVelocityError) ||
+                      Boolean(snareVelocityError) ||
+                      Boolean(hihatClosedVelocityError) ||
+                      Boolean(rideVelocityError) ||
+                      Boolean(hihatOpenVelocityError) ||
+                      Boolean(crashVelocityError) ||
+                      Boolean(tomsVelocityError)
+                    }
+                  >
+                    {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => void handleGenerateGhosts()}
+                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                  >
+                    {isGeneratingGhosts ? "Generating Ghosts..." : "Generate Ghosts"}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => void handleDownloadMidi()}
+                    disabled={
+                      isLoadingPresets ||
+                      isGeneratingPattern ||
+                      isGenerating ||
+                      isGeneratingGhosts ||
+                      isEditingPattern ||
+                      !selectedPreset ||
+                      Boolean(currentGroupingError) ||
+                      Boolean(kickVelocityError) ||
+                      Boolean(snareVelocityError) ||
+                      Boolean(hihatClosedVelocityError) ||
+                      Boolean(rideVelocityError) ||
+                      Boolean(hihatOpenVelocityError) ||
+                      Boolean(crashVelocityError) ||
+                      Boolean(tomsVelocityError)
+                    }
+                  >
+                    {isGenerating ? "Downloading MIDI..." : pattern ? "Download Edited MIDI" : "Download MIDI"}
+                  </button>
+
                   <button
                     type="button"
                     onClick={() => void handlePlay()}
-                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isEditingPattern}
+                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
                   >
                     Play
                   </button>
@@ -974,97 +1095,61 @@ function App() {
                     type="button"
                     className="button-secondary"
                     onClick={() => void handleRestart()}
-                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isEditingPattern}
+                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
                   >
                     Restart
                   </button>
                 </div>
 
-                <label className="field-checkbox field-checkbox-panel">
-                  <input
-                    type="checkbox"
-                    checked={isLoopEnabled}
-                    onChange={(event) => {
-                      const nextValue = event.target.checked;
-                      setIsLoopEnabled(nextValue);
-                      getPatternPlayer().setLoopEnabled(nextValue);
-                    }}
-                  />
-                  <span>Loop</span>
-                </label>
+                <div className="toggle-row">
+                  <label className="field-checkbox field-checkbox-panel">
+                    <input
+                      type="checkbox"
+                      checked={isLoopEnabled}
+                      onChange={(event) => {
+                        const nextValue = event.target.checked;
+                        setIsLoopEnabled(nextValue);
+                        getPatternPlayer().setLoopEnabled(nextValue);
+                      }}
+                    />
+                    <span>Loop</span>
+                  </label>
+
+                  <label className="field-checkbox field-checkbox-panel">
+                    <input
+                      type="checkbox"
+                      checked={isEditGridEnabled}
+                      onChange={(event) => {
+                        setIsEditGridEnabled(event.target.checked);
+                        if (!event.target.checked) {
+                          setDragState(null);
+                        }
+                      }}
+                    />
+                    <span>Edit Grid</span>
+                  </label>
+                </div>
 
                 <p className="message">Playback: {playbackStatus}</p>
               </div>
-
-              <label className="field-checkbox field-checkbox-panel">
-                <input
-                  type="checkbox"
-                  checked={isEditGridEnabled}
-                  onChange={(event) => {
-                    setIsEditGridEnabled(event.target.checked);
-                    if (!event.target.checked) {
-                      setDragState(null);
-                    }
-                  }}
-                />
-                <span>Edit Grid</span>
-              </label>
-
-              <button
-                type="submit"
-                disabled={
-                  isLoadingPresets ||
-                  isGeneratingPattern ||
-                  isGenerating ||
-                  isEditingPattern ||
-                  !selectedPreset ||
-                  Boolean(currentGroupingError) ||
-                  Boolean(kickVelocityError) ||
-                  Boolean(snareVelocityError) ||
-                  Boolean(hihatClosedVelocityError) ||
-                  Boolean(rideVelocityError) ||
-                  Boolean(hihatOpenVelocityError) ||
-                  Boolean(crashVelocityError) ||
-                  Boolean(tomsVelocityError)
-                }
-              >
-                {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
-              </button>
-
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={() => void handleDownloadMidi()}
-                disabled={
-                  isLoadingPresets ||
-                  isGeneratingPattern ||
-                  isGenerating ||
-                  isEditingPattern ||
-                  !selectedPreset ||
-                  Boolean(currentGroupingError) ||
-                  Boolean(kickVelocityError) ||
-                  Boolean(snareVelocityError) ||
-                  Boolean(hihatClosedVelocityError) ||
-                  Boolean(rideVelocityError) ||
-                  Boolean(hihatOpenVelocityError) ||
-                  Boolean(crashVelocityError) ||
-                  Boolean(tomsVelocityError)
-                }
-              >
-                {isGenerating ? "Downloading MIDI..." : pattern ? "Download Edited MIDI" : "Download MIDI"}
-              </button>
-            </div>
+            </section>
           </div>
         </aside>
 
         <section className="workspace">
           <div className="workspace-header">
             <h2>Instruments</h2>
-            <p>Shape individual layers without changing the global groove architecture.</p>
+            <p>Shape individual layers without changing the core groove logic or control behavior.</p>
           </div>
 
-          <div className="workspace-panels">
-            <div className="instrument-strip">
+          <div className="instrument-bands">
+            <section className="band-card band-card-backbone">
+              <div className="band-header">
+                <h3>Backbone</h3>
+                <p>Kick and snare define the structural weight of the groove.</p>
+              </div>
+
+              <div className="band-grid band-grid-2">
               <section className="instrument-card">
                 <div className="instrument-head">
                   <h3>Kick</h3>
@@ -1165,74 +1250,6 @@ function App() {
                           }}
                         />
                       </label>
-                    </div>
-                  </div>
-
-                  <div className="ghost-card">
-                    <div className="ghost-card-head">
-                      <h4>Ghost Layer</h4>
-                      <p>Secondary snare notes, aligned with the desktop behavior.</p>
-                    </div>
-
-                    <label className="field-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={snareGhostEnabled}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setSnareGhostEnabled(event.target.checked);
-                        }}
-                      />
-                      <span>Enabled</span>
-                    </label>
-
-                    <label className="field">
-                      <span>Density</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={snareGhostDensity}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setSnareGhostDensity(Number(event.target.value));
-                        }}
-                      />
-                    </label>
-
-                    <label className="field">
-                      <span>Velocity</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={127}
-                        step={1}
-                        value={snareGhostVelocity}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setSnareGhostVelocity(Number(event.target.value));
-                        }}
-                      />
-                    </label>
-
-                    <div className="field">
-                      <span>Placement</span>
-                      <div className="segmented-control" role="group" aria-label="Snare ghost placement">
-                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={option.value === snareGhostPlacement ? "segment-button segment-button-active" : "segment-button"}
-                            onClick={() => {
-                              switchToCustomIfNeeded();
-                              setSnareGhostPlacement(option.value);
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -1344,16 +1361,16 @@ function App() {
                   <div className="ghost-card">
                     <div className="ghost-card-head">
                       <h4>Ghost Layer</h4>
-                      <p>Subtle pulse notes around the main closed-hat anchors.</p>
+                      <p>Secondary snare notes, aligned with the desktop behavior.</p>
                     </div>
 
                     <label className="field-checkbox">
                       <input
                         type="checkbox"
-                        checked={hihatClosedGhostEnabled}
+                        checked={snareGhostEnabled}
                         onChange={(event) => {
                           switchToCustomIfNeeded();
-                          setHihatClosedGhostEnabled(event.target.checked);
+                          setSnareGhostEnabled(event.target.checked);
                         }}
                       />
                       <span>Enabled</span>
@@ -1366,10 +1383,10 @@ function App() {
                         min={0}
                         max={1}
                         step={0.01}
-                        value={hihatClosedGhostDensity}
+                        value={snareGhostDensity}
                         onChange={(event) => {
                           switchToCustomIfNeeded();
-                          setHihatClosedGhostDensity(Number(event.target.value));
+                          setSnareGhostDensity(Number(event.target.value));
                         }}
                       />
                     </label>
@@ -1381,29 +1398,29 @@ function App() {
                         min={1}
                         max={127}
                         step={1}
-                        value={hihatClosedGhostVelocity}
+                        value={snareGhostVelocity}
                         onChange={(event) => {
                           switchToCustomIfNeeded();
-                          setHihatClosedGhostVelocity(Number(event.target.value));
+                          setSnareGhostVelocity(Number(event.target.value));
                         }}
                       />
                     </label>
 
                     <div className="field">
                       <span>Placement</span>
-                      <div className="segmented-control" role="group" aria-label="Hi-Hat Closed ghost placement">
+                      <div className="segmented-control" role="group" aria-label="Snare ghost placement">
                         {GHOST_PLACEMENT_OPTIONS.map((option) => (
                           <button
                             key={option.value}
                             type="button"
                             className={
-                              option.value === hihatClosedGhostPlacement
+                              option.value === snareGhostPlacement
                                 ? "segment-button segment-button-active"
                                 : "segment-button"
                             }
                             onClick={() => {
                               switchToCustomIfNeeded();
-                              setHihatClosedGhostPlacement(option.value);
+                              setSnareGhostPlacement(option.value);
                             }}
                           >
                             {option.label}
@@ -1414,7 +1431,16 @@ function App() {
                   </div>
                 </div>
               </section>
+              </div>
+            </section>
 
+            <section className="band-card band-card-pulse">
+              <div className="band-header">
+                <h3>Pulse</h3>
+                <p>Closed hat and ride handle spacing, subdivision, and forward motion.</p>
+              </div>
+
+              <div className="band-grid band-grid-2">
               <section className="instrument-card">
                 <div className="instrument-head">
                   <h3>Hi-Hat Closed</h3>
@@ -1521,16 +1547,16 @@ function App() {
                   <div className="ghost-card">
                     <div className="ghost-card-head">
                       <h4>Ghost Layer</h4>
-                      <p>Low-velocity ride taps, matching the Python desktop controls.</p>
+                      <p>Subtle pulse notes around the main closed-hat anchors.</p>
                     </div>
 
                     <label className="field-checkbox">
                       <input
                         type="checkbox"
-                        checked={rideGhostEnabled}
+                        checked={hihatClosedGhostEnabled}
                         onChange={(event) => {
                           switchToCustomIfNeeded();
-                          setRideGhostEnabled(event.target.checked);
+                          setHihatClosedGhostEnabled(event.target.checked);
                         }}
                       />
                       <span>Enabled</span>
@@ -1543,10 +1569,10 @@ function App() {
                         min={0}
                         max={1}
                         step={0.01}
-                        value={rideGhostDensity}
+                        value={hihatClosedGhostDensity}
                         onChange={(event) => {
                           switchToCustomIfNeeded();
-                          setRideGhostDensity(Number(event.target.value));
+                          setHihatClosedGhostDensity(Number(event.target.value));
                         }}
                       />
                     </label>
@@ -1558,25 +1584,29 @@ function App() {
                         min={1}
                         max={127}
                         step={1}
-                        value={rideGhostVelocity}
+                        value={hihatClosedGhostVelocity}
                         onChange={(event) => {
                           switchToCustomIfNeeded();
-                          setRideGhostVelocity(Number(event.target.value));
+                          setHihatClosedGhostVelocity(Number(event.target.value));
                         }}
                       />
                     </label>
 
                     <div className="field">
                       <span>Placement</span>
-                      <div className="segmented-control" role="group" aria-label="Ride ghost placement">
+                      <div className="segmented-control" role="group" aria-label="Hi-Hat Closed ghost placement">
                         {GHOST_PLACEMENT_OPTIONS.map((option) => (
                           <button
                             key={option.value}
                             type="button"
-                            className={option.value === rideGhostPlacement ? "segment-button segment-button-active" : "segment-button"}
+                            className={
+                              option.value === hihatClosedGhostPlacement
+                                ? "segment-button segment-button-active"
+                                : "segment-button"
+                            }
                             onClick={() => {
                               switchToCustomIfNeeded();
-                              setRideGhostPlacement(option.value);
+                              setHihatClosedGhostPlacement(option.value);
                             }}
                           >
                             {option.label}
@@ -1690,16 +1720,86 @@ function App() {
                       </label>
                     </div>
                   </div>
+
+                  <div className="ghost-card">
+                    <div className="ghost-card-head">
+                      <h4>Ghost Layer</h4>
+                      <p>Low-velocity ride taps, matching the Python desktop controls.</p>
+                    </div>
+
+                    <label className="field-checkbox">
+                      <input
+                        type="checkbox"
+                        checked={rideGhostEnabled}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setRideGhostEnabled(event.target.checked);
+                        }}
+                      />
+                      <span>Enabled</span>
+                    </label>
+
+                    <label className="field">
+                      <span>Density</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={rideGhostDensity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setRideGhostDensity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <label className="field">
+                      <span>Velocity</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={127}
+                        step={1}
+                        value={rideGhostVelocity}
+                        onChange={(event) => {
+                          switchToCustomIfNeeded();
+                          setRideGhostVelocity(Number(event.target.value));
+                        }}
+                      />
+                    </label>
+
+                    <div className="field">
+                      <span>Placement</span>
+                      <div className="segmented-control" role="group" aria-label="Ride ghost placement">
+                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={option.value === rideGhostPlacement ? "segment-button segment-button-active" : "segment-button"}
+                            onClick={() => {
+                              switchToCustomIfNeeded();
+                              setRideGhostPlacement(option.value);
+                            }}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </section>
-            </div>
+              </div>
+            </section>
 
-            <aside className="special-column">
-              <div className="special-column-header">
-                <h3>Accent / Special</h3>
-                <p>Short-form layers for release, accents, and future fill voices.</p>
+            <section className="band-card band-card-accents">
+              <div className="band-header">
+                <h3>Accents</h3>
+                <p>Open hat, crash, and toms add release, punctuation, and movement.</p>
               </div>
 
+              <div className="band-grid band-grid-3">
               <section className="instrument-card instrument-card-compact">
                 <div className="instrument-head">
                   <h3>Hi-Hat Open</h3>
@@ -1932,7 +2032,8 @@ function App() {
                   </div>
                 </div>
               </section>
-            </aside>
+              </div>
+            </section>
           </div>
 
           <section className="pattern-grid-card card">

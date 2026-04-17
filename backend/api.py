@@ -129,6 +129,7 @@ class PatternPayloadRequest(BaseModel):
     instrument_order: list[str]
     events: dict[str, list[PatternEventRequest]]
     fill_regions: list[FillRegionRequest] = []
+    bpm_override: int | None = Field(default=None, ge=1)
 
 
 class PatternCellRequest(BaseModel):
@@ -146,6 +147,27 @@ class PatternMoveRequest(BaseModel):
     to_bar: int = Field(ge=0)
     to_slot: int = Field(ge=0)
     hit_type: Literal["main", "accent", "ghost"]
+
+
+class PatternGenerateGhostsRequest(BaseModel):
+    pattern: PatternPayloadRequest
+    snare_enabled: bool | None = None
+    snare_ghost_enabled: bool | None = None
+    snare_ghost_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    snare_ghost_velocity: int | None = Field(default=None, ge=1, le=127)
+    snare_ghost_placement: Literal["before", "after", "both"] | None = None
+    hihat_closed_enabled: bool | None = None
+    hihat_closed_division: Literal["quarter", "eighth", "sixteenth"] | None = None
+    hihat_closed_ghost_enabled: bool | None = None
+    hihat_closed_ghost_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    hihat_closed_ghost_velocity: int | None = Field(default=None, ge=1, le=127)
+    hihat_closed_ghost_placement: Literal["before", "after", "both"] | None = None
+    ride_enabled: bool | None = None
+    ride_division: Literal["quarter", "eighth", "sixteenth"] | None = None
+    ride_ghost_enabled: bool | None = None
+    ride_ghost_density: float | None = Field(default=None, ge=0.0, le=1.0)
+    ride_ghost_velocity: int | None = Field(default=None, ge=1, le=127)
+    ride_ghost_placement: Literal["before", "after", "both"] | None = None
 
 
 @app.get("/")
@@ -449,6 +471,57 @@ def _pattern_from_payload(payload: PatternPayloadRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _apply_ghost_regeneration_overrides(pattern, request: PatternGenerateGhostsRequest) -> None:
+    snare = pattern.instruments["snare"]
+    if request.snare_enabled is not None:
+        snare.enabled = request.snare_enabled
+    if snare.ghost_settings is not None:
+        if request.snare_ghost_enabled is not None:
+            snare.ghost_settings.enabled = request.snare_ghost_enabled
+        if request.snare_ghost_density is not None:
+            snare.ghost_settings.density = request.snare_ghost_density
+        if request.snare_ghost_velocity is not None:
+            snare.ghost_settings.velocity = request.snare_ghost_velocity
+            snare.ghost_settings.velocity_min, snare.ghost_settings.velocity_max = snare.ghost_settings.velocity_bounds()
+        if request.snare_ghost_placement is not None:
+            snare.ghost_settings.placement = request.snare_ghost_placement
+
+    hihat_closed = pattern.instruments["hihat_closed"]
+    if request.hihat_closed_enabled is not None:
+        hihat_closed.enabled = request.hihat_closed_enabled
+    if request.hihat_closed_division is not None:
+        hihat_closed.pulse_division = request.hihat_closed_division
+    if hihat_closed.ghost_settings is not None:
+        if request.hihat_closed_ghost_enabled is not None:
+            hihat_closed.ghost_settings.enabled = request.hihat_closed_ghost_enabled
+        if request.hihat_closed_ghost_density is not None:
+            hihat_closed.ghost_settings.density = request.hihat_closed_ghost_density
+        if request.hihat_closed_ghost_velocity is not None:
+            hihat_closed.ghost_settings.velocity = request.hihat_closed_ghost_velocity
+            (
+                hihat_closed.ghost_settings.velocity_min,
+                hihat_closed.ghost_settings.velocity_max,
+            ) = hihat_closed.ghost_settings.velocity_bounds()
+        if request.hihat_closed_ghost_placement is not None:
+            hihat_closed.ghost_settings.placement = request.hihat_closed_ghost_placement
+
+    ride = pattern.instruments["ride"]
+    if request.ride_enabled is not None:
+        ride.enabled = request.ride_enabled
+    if request.ride_division is not None:
+        ride.pulse_division = request.ride_division
+    if ride.ghost_settings is not None:
+        if request.ride_ghost_enabled is not None:
+            ride.ghost_settings.enabled = request.ride_ghost_enabled
+        if request.ride_ghost_density is not None:
+            ride.ghost_settings.density = request.ride_ghost_density
+        if request.ride_ghost_velocity is not None:
+            ride.ghost_settings.velocity = request.ride_ghost_velocity
+            ride.ghost_settings.velocity_min, ride.ghost_settings.velocity_max = ride.ghost_settings.velocity_bounds()
+        if request.ride_ghost_placement is not None:
+            ride.ghost_settings.placement = request.ride_ghost_placement
+
+
 def _global_slot(pattern, bar: int, slot: int) -> int:
     if bar < 0 or bar >= pattern.settings.bars:
         raise HTTPException(status_code=400, detail=f"Invalid bar index: {bar}")
@@ -516,6 +589,14 @@ def move_hit(request: PatternMoveRequest):
     return serialize_pattern(pattern)
 
 
+@app.post("/pattern/generate-ghosts")
+def generate_ghosts(request: PatternGenerateGhostsRequest):
+    pattern = _pattern_from_payload(request.pattern)
+    _apply_ghost_regeneration_overrides(pattern, request)
+    generator.regenerate_ghost_hits(pattern)
+    return serialize_pattern(pattern)
+
+
 @app.post("/export-midi")
 def export_midi(request: PatternPayloadRequest):
     try:
@@ -526,7 +607,7 @@ def export_midi(request: PatternPayloadRequest):
     file_descriptor, midi_path = tempfile.mkstemp(suffix=".mid")
     os.close(file_descriptor)
 
-    export_pattern_to_midi(pattern, midi_path, bpm_override=request.meta.bpm)
+    export_pattern_to_midi(pattern, midi_path, bpm_override=request.bpm_override or request.meta.bpm)
 
     return FileResponse(
         midi_path,
