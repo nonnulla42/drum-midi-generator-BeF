@@ -1170,7 +1170,7 @@ function App() {
 
                   <div className="ghost-card">
                     <div className="ghost-card-head">
-                      <h4>Ghost</h4>
+                      <h4>Ghost Layer</h4>
                       <p>Secondary snare notes, aligned with the desktop behavior.</p>
                     </div>
 
@@ -1216,24 +1216,24 @@ function App() {
                       />
                     </label>
 
-                    <label className="field">
+                    <div className="field">
                       <span>Placement</span>
-                      <select
-                        value={snareGhostPlacement}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setSnareGhostPlacement(
-                            event.target.value as (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"],
-                          );
-                        }}
-                      >
+                      <div className="segmented-control" role="group" aria-label="Snare ghost placement">
                         {GHOST_PLACEMENT_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={option.value === snareGhostPlacement ? "segment-button segment-button-active" : "segment-button"}
+                            onClick={() => {
+                              switchToCustomIfNeeded();
+                              setSnareGhostPlacement(option.value);
+                            }}
+                          >
                             {option.label}
-                          </option>
+                          </button>
                         ))}
-                      </select>
-                    </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1343,7 +1343,7 @@ function App() {
 
                   <div className="ghost-card">
                     <div className="ghost-card-head">
-                      <h4>Ghost</h4>
+                      <h4>Ghost Layer</h4>
                       <p>Subtle pulse notes around the main closed-hat anchors.</p>
                     </div>
 
@@ -1389,24 +1389,28 @@ function App() {
                       />
                     </label>
 
-                    <label className="field">
+                    <div className="field">
                       <span>Placement</span>
-                      <select
-                        value={hihatClosedGhostPlacement}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setHihatClosedGhostPlacement(
-                            event.target.value as (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"],
-                          );
-                        }}
-                      >
+                      <div className="segmented-control" role="group" aria-label="Hi-Hat Closed ghost placement">
                         {GHOST_PLACEMENT_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={
+                              option.value === hihatClosedGhostPlacement
+                                ? "segment-button segment-button-active"
+                                : "segment-button"
+                            }
+                            onClick={() => {
+                              switchToCustomIfNeeded();
+                              setHihatClosedGhostPlacement(option.value);
+                            }}
+                          >
                             {option.label}
-                          </option>
+                          </button>
                         ))}
-                      </select>
-                    </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1516,7 +1520,7 @@ function App() {
 
                   <div className="ghost-card">
                     <div className="ghost-card-head">
-                      <h4>Ghost</h4>
+                      <h4>Ghost Layer</h4>
                       <p>Low-velocity ride taps, matching the Python desktop controls.</p>
                     </div>
 
@@ -1562,24 +1566,24 @@ function App() {
                       />
                     </label>
 
-                    <label className="field">
+                    <div className="field">
                       <span>Placement</span>
-                      <select
-                        value={rideGhostPlacement}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setRideGhostPlacement(
-                            event.target.value as (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"],
-                          );
-                        }}
-                      >
+                      <div className="segmented-control" role="group" aria-label="Ride ghost placement">
                         {GHOST_PLACEMENT_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={option.value === rideGhostPlacement ? "segment-button segment-button-active" : "segment-button"}
+                            onClick={() => {
+                              switchToCustomIfNeeded();
+                              setRideGhostPlacement(option.value);
+                            }}
+                          >
                             {option.label}
-                          </option>
+                          </button>
                         ))}
-                      </select>
-                    </label>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </section>

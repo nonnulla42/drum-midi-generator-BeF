@@ -141,23 +141,57 @@ select {
 
 .ghost-card {
   display: grid;
-  gap: 12px;
-  margin-top: 4px;
-  padding: 16px;
-  border-radius: 16px;
-  background: #f6f9fe;
+  gap: 14px;
+  margin-top: 8px;
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f8fbff 0%, #f2f7fe 100%);
   border: 1px solid #d7e2f1;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
 .ghost-card-head h4 {
   margin: 0 0 4px;
   font-size: 0.95rem;
+  letter-spacing: 0.02em;
 }
 
 .ghost-card-head p {
   margin: 0;
   color: #5e6d89;
   font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.segment-button {
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid #c8d6ee;
+  background: #ffffff;
+  color: #35507d;
+  font-weight: 600;
+}
+
+.segment-button:hover:enabled {
+  background: #edf4ff;
+  color: #17315f;
+}
+
+.segment-button-active {
+  background: #dce9ff;
+  color: #12305e;
+  border-color: #98b7eb;
+}
+
+.ghost-card .field span,
+.ghost-card .field-checkbox span {
+  font-size: 0.92rem;
 }
 
 .instrument-head {
@@ -446,7 +480,8 @@ button:disabled {
 
   .inline-fields,
   .range-fields,
-  .playback-actions {
+  .playback-actions,
+  .segmented-control {
     grid-template-columns: 1fr;
   }
 }
