@@ -4,7 +4,20 @@ from unittest.mock import patch
 from fastapi import HTTPException
 from mido import MidiFile, bpm2tempo
 
-from api import GenerateRequest, _delete_file, generate, presets
+from api import (
+    GenerateRequest,
+    PatternCellRequest,
+    PatternMoveRequest,
+    PatternPayloadRequest,
+    _delete_file,
+    add_base_hit,
+    export_midi,
+    generate,
+    generate_pattern,
+    move_hit,
+    presets,
+    remove_hit,
+)
 
 
 class ApiTests(unittest.TestCase):
@@ -26,6 +39,128 @@ class ApiTests(unittest.TestCase):
         self.assertIn("toms", items[0])
         self.assertIn("high_hits", items[0]["toms"])
         self.assertTrue(any(item["id"] == "Math Drive - 7/4 - Chorus" for item in items))
+
+    def test_generate_pattern_returns_event_based_payload(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120))
+
+        self.assertEqual(payload["pattern_version"], 1)
+        self.assertEqual(payload["meta"]["bpm"], 120)
+        self.assertEqual(payload["meta"]["bars"], 1)
+        self.assertEqual(payload["meta"]["grouping"], "2+2")
+        self.assertEqual(payload["meta"]["slots_per_bar"], 32)
+        self.assertEqual(payload["meta"]["humanize_timing"], 6)
+        self.assertEqual(payload["meta"]["humanize_velocity"], 6)
+        self.assertEqual(
+            payload["instrument_order"],
+            [
+                "kick",
+                "snare",
+                "hihat_closed",
+                "hihat_open",
+                "ride",
+                "crash",
+                "tom_high",
+                "tom_mid",
+                "tom_low",
+            ],
+        )
+        self.assertEqual(set(payload["events"].keys()), set(payload["instrument_order"]))
+        self.assertIsInstance(payload["fill_regions"], list)
+
+    def test_generate_pattern_exposes_real_hit_fields(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120))
+        first_event = next(event for events in payload["events"].values() for event in events)
+
+        self.assertIn("bar", first_event)
+        self.assertIn("slot", first_event)
+        self.assertIn("hit_type", first_event)
+        self.assertIn("velocity", first_event)
+        self.assertIn("offset", first_event)
+        self.assertIn("length_ticks", first_event)
+        self.assertIn("source", first_event)
+
+    def test_generate_pattern_uses_derived_slots_per_bar_for_odd_meter(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, grouping="3+2"))
+
+        self.assertEqual(payload["meta"]["grouping"], "3+2")
+        self.assertEqual(payload["meta"]["slots_per_bar"], 40)
+
+    def test_add_base_hit_uses_core_manual_hit_behavior(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
+
+        updated = add_base_hit(PatternCellRequest(pattern=PatternPayloadRequest(**payload), instrument="kick", bar=0, slot=1))
+        added = next(event for event in updated["events"]["kick"] if event["bar"] == 0 and event["slot"] == 1)
+
+        self.assertEqual(added["hit_type"], "main")
+        self.assertEqual(added["source"], "manual")
+        self.assertEqual(added["length_ticks"], 70)
+        self.assertLessEqual(abs(added["offset"]), 0)
+
+    def test_remove_hit_removes_visible_hit_at_cell(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
+        updated = add_base_hit(PatternCellRequest(pattern=PatternPayloadRequest(**payload), instrument="kick", bar=0, slot=1))
+
+        removed = remove_hit(PatternCellRequest(pattern=PatternPayloadRequest(**updated), instrument="kick", bar=0, slot=1))
+
+        self.assertFalse(any(event["bar"] == 0 and event["slot"] == 1 for event in removed["events"]["kick"]))
+
+    def test_move_hit_moves_base_hit_and_preserves_manual_fields(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=8, humanize_velocity=8))
+        updated = add_base_hit(PatternCellRequest(pattern=PatternPayloadRequest(**payload), instrument="kick", bar=0, slot=1))
+        original = next(event for event in updated["events"]["kick"] if event["bar"] == 0 and event["slot"] == 1)
+
+        moved = move_hit(
+            PatternMoveRequest(
+                pattern=PatternPayloadRequest(**updated),
+                instrument="kick",
+                from_bar=0,
+                from_slot=1,
+                to_bar=0,
+                to_slot=3,
+                hit_type="main",
+            )
+        )
+
+        target = next(event for event in moved["events"]["kick"] if event["bar"] == 0 and event["slot"] == 3)
+        self.assertEqual(target["velocity"], original["velocity"])
+        self.assertEqual(target["offset"], original["offset"])
+        self.assertEqual(target["length_ticks"], original["length_ticks"])
+        self.assertEqual(target["source"], original["source"])
+
+    def test_export_midi_uses_pattern_payload(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, grouping="3+2"))
+        payload["events"]["kick"] = [
+            {
+                "bar": 0,
+                "slot": 0,
+                "hit_type": "main",
+                "velocity": 111,
+                "offset": 0,
+                "length_ticks": 70,
+                "source": "manual",
+            }
+        ]
+
+        response = export_midi(PatternPayloadRequest(**payload))
+        self.addCleanup(_delete_file, response.path)
+
+        midi = MidiFile(response.path)
+        time_signatures = [message for track in midi.tracks for message in track if message.type == "time_signature"]
+        note_on_messages = [message for track in midi.tracks for message in track if message.type == "note_on" and message.velocity > 0]
+
+        self.assertTrue(time_signatures)
+        self.assertEqual(time_signatures[0].numerator, 5)
+        self.assertEqual(note_on_messages[0].velocity, 111)
+
+    def test_export_midi_rejects_mismatched_slots_per_bar(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120))
+        payload["meta"]["slots_per_bar"] = 40
+
+        with self.assertRaises(HTTPException) as captured:
+            export_midi(PatternPayloadRequest(**payload))
+
+        self.assertEqual(captured.exception.status_code, 400)
+        self.assertEqual(captured.exception.detail, "slots_per_bar does not match grouping")
 
     def test_generate_uses_requested_bpm_in_exported_midi(self) -> None:
         response = generate(GenerateRequest(bpm=90))

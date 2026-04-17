@@ -117,6 +117,36 @@ export type GenerateMidiInput = {
   toms_velocity_max?: number;
 };
 
+export type PatternEvent = {
+  bar: number;
+  slot: number;
+  hit_type: "main" | "accent" | "ghost";
+  velocity: number;
+  offset: number;
+  length_ticks: number;
+  source: string;
+};
+
+export type GeneratedPattern = {
+  pattern_version: number;
+  meta: {
+    bpm: number;
+    bars: number;
+    grouping: string;
+    slots_per_bar: number;
+    swing: number;
+    humanize_timing: number;
+    humanize_velocity: number;
+  };
+  instrument_order: string[];
+  events: Record<string, PatternEvent[]>;
+  fill_regions: Array<{
+    bar: number;
+    slots: number[];
+    intensity: string;
+  }>;
+};
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 async function parseError(response: Response): Promise<string> {
@@ -156,4 +186,81 @@ export async function generateMidi(input: GenerateMidiInput): Promise<Blob> {
   }
 
   return response.blob();
+}
+
+export async function generatePattern(input: GenerateMidiInput): Promise<GeneratedPattern> {
+  const response = await fetch(`${API_BASE_URL}/generate-pattern`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+
+  return response.json() as Promise<GeneratedPattern>;
+}
+
+export async function exportPatternMidi(pattern: GeneratedPattern): Promise<Blob> {
+  const response = await fetch(`${API_BASE_URL}/export-midi`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(pattern),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+
+  return response.blob();
+}
+
+type PatternCellEditInput = {
+  pattern: GeneratedPattern;
+  instrument: string;
+  bar: number;
+  slot: number;
+};
+
+type PatternMoveEditInput = {
+  pattern: GeneratedPattern;
+  instrument: string;
+  from_bar: number;
+  from_slot: number;
+  to_bar: number;
+  to_slot: number;
+  hit_type: "main" | "accent" | "ghost";
+};
+
+async function postPatternEdit<TInput>(path: string, input: TInput): Promise<GeneratedPattern> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseError(response));
+  }
+
+  return response.json() as Promise<GeneratedPattern>;
+}
+
+export function addPatternBaseHit(input: PatternCellEditInput): Promise<GeneratedPattern> {
+  return postPatternEdit("/pattern/add-base-hit", input);
+}
+
+export function removePatternHit(input: PatternCellEditInput): Promise<GeneratedPattern> {
+  return postPatternEdit("/pattern/remove-hit", input);
+}
+
+export function movePatternHit(input: PatternMoveEditInput): Promise<GeneratedPattern> {
+  return postPatternEdit("/pattern/move-hit", input);
 }

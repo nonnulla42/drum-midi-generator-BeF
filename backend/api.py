@@ -12,6 +12,7 @@ from core.generator import DrumPatternGenerator
 from core.instruments import build_default_instruments
 from core.midi_export import export_pattern_to_midi
 from core.pattern import GlobalSettings
+from core.pattern_serialization import deserialize_pattern, serialize_pattern
 from core.presets import load_preset, preset_names
 from core.timing import parse_grouping
 
@@ -79,6 +80,57 @@ class GenerateRequest(BaseModel):
     toms_low_hits: int | None = Field(default=None, ge=0, le=3)
     toms_velocity_min: int | None = Field(default=None, ge=1, le=127)
     toms_velocity_max: int | None = Field(default=None, ge=1, le=127)
+
+
+class PatternMetaRequest(BaseModel):
+    bpm: int = Field(ge=1)
+    bars: int = Field(ge=1)
+    grouping: str
+    slots_per_bar: int = Field(ge=1)
+    swing: float = Field(default=0.0, ge=0.0, le=0.65)
+    humanize_timing: int = Field(default=6, ge=0, le=24)
+    humanize_velocity: int = Field(default=6, ge=0, le=24)
+
+
+class PatternEventRequest(BaseModel):
+    bar: int = Field(ge=0)
+    slot: int = Field(ge=0)
+    hit_type: Literal["main", "accent", "ghost"]
+    velocity: int = Field(ge=1, le=127)
+    offset: int
+    length_ticks: int = Field(ge=1)
+    source: str = "generated"
+
+
+class FillRegionRequest(BaseModel):
+    bar: int = Field(ge=0)
+    slots: list[int]
+    intensity: str
+
+
+class PatternPayloadRequest(BaseModel):
+    pattern_version: int = 1
+    meta: PatternMetaRequest
+    instrument_order: list[str]
+    events: dict[str, list[PatternEventRequest]]
+    fill_regions: list[FillRegionRequest] = []
+
+
+class PatternCellRequest(BaseModel):
+    pattern: PatternPayloadRequest
+    instrument: str
+    bar: int = Field(ge=0)
+    slot: int = Field(ge=0)
+
+
+class PatternMoveRequest(BaseModel):
+    pattern: PatternPayloadRequest
+    instrument: str
+    from_bar: int = Field(ge=0)
+    from_slot: int = Field(ge=0)
+    to_bar: int = Field(ge=0)
+    to_slot: int = Field(ge=0)
+    hit_type: Literal["main", "accent", "ghost"]
 
 
 @app.get("/")
@@ -177,8 +229,7 @@ def _delete_file(path: str) -> None:
         os.unlink(path)
 
 
-@app.post("/generate")
-def generate(request: GenerateRequest):
+def _build_pattern(request: GenerateRequest):
     if request.preset is None:
         settings = GlobalSettings()
         instruments = build_default_instruments()
@@ -316,7 +367,106 @@ def generate(request: GenerateRequest):
     if tom_high.velocity_max < tom_high.velocity_min:
         raise HTTPException(status_code=400, detail="Toms velocity max must be greater than or equal to min")
 
-    pattern = generator.generate(settings, instruments)
+    return generator.generate(settings, instruments)
+
+
+def _pattern_from_payload(payload: PatternPayloadRequest):
+    try:
+        return deserialize_pattern(payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _global_slot(pattern, bar: int, slot: int) -> int:
+    if bar < 0 or bar >= pattern.settings.bars:
+        raise HTTPException(status_code=400, detail=f"Invalid bar index: {bar}")
+    if slot < 0 or slot >= pattern.total_slots_per_bar:
+        raise HTTPException(status_code=400, detail=f"Invalid slot index: {slot}")
+    return bar * pattern.total_slots_per_bar + slot
+
+
+@app.post("/generate-pattern")
+def generate_pattern(request: GenerateRequest):
+    return serialize_pattern(_build_pattern(request))
+
+
+@app.post("/pattern/add-base-hit")
+def add_base_hit(request: PatternCellRequest):
+    pattern = _pattern_from_payload(request.pattern)
+    config = pattern.instruments.get(request.instrument)
+    if config is None:
+        raise HTTPException(status_code=400, detail=f"Unknown instrument: {request.instrument}")
+
+    global_slot_index = _global_slot(pattern, request.bar, request.slot)
+    added = pattern.add_manual_base_hit(
+        instrument_key=request.instrument,
+        global_slot_index=global_slot_index,
+        config=config,
+        humanize_timing=pattern.settings.humanize_timing,
+        humanize_velocity_amount=pattern.settings.humanize_velocity,
+    )
+    if added is None:
+        raise HTTPException(status_code=400, detail="Could not add base hit at requested cell")
+    return serialize_pattern(pattern)
+
+
+@app.post("/pattern/remove-hit")
+def remove_hit(request: PatternCellRequest):
+    pattern = _pattern_from_payload(request.pattern)
+    if request.instrument not in pattern.instruments:
+        raise HTTPException(status_code=400, detail=f"Unknown instrument: {request.instrument}")
+
+    global_slot_index = _global_slot(pattern, request.bar, request.slot)
+    removed = pattern.remove_base_hit_at_cell(request.instrument, global_slot_index)
+    if not removed:
+        removed = pattern.remove_ghost_hit_at_cell(request.instrument, global_slot_index)
+    if not removed:
+        raise HTTPException(status_code=400, detail="Could not remove hit at requested cell")
+    return serialize_pattern(pattern)
+
+
+@app.post("/pattern/move-hit")
+def move_hit(request: PatternMoveRequest):
+    pattern = _pattern_from_payload(request.pattern)
+    if request.instrument not in pattern.instruments:
+        raise HTTPException(status_code=400, detail=f"Unknown instrument: {request.instrument}")
+
+    from_global_slot_index = _global_slot(pattern, request.from_bar, request.from_slot)
+    to_global_slot_index = _global_slot(pattern, request.to_bar, request.to_slot)
+
+    if request.hit_type == "ghost":
+        moved = pattern.move_ghost_hit(request.instrument, from_global_slot_index, to_global_slot_index)
+    else:
+        moved = pattern.move_base_hit(request.instrument, from_global_slot_index, to_global_slot_index)
+
+    if not moved:
+        raise HTTPException(status_code=400, detail="Could not move hit to requested cell")
+    return serialize_pattern(pattern)
+
+
+@app.post("/export-midi")
+def export_midi(request: PatternPayloadRequest):
+    try:
+        pattern = deserialize_pattern(request.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    file_descriptor, midi_path = tempfile.mkstemp(suffix=".mid")
+    os.close(file_descriptor)
+
+    export_pattern_to_midi(pattern, midi_path, bpm_override=request.meta.bpm)
+
+    return FileResponse(
+        midi_path,
+        filename="pattern.mid",
+        media_type="audio/midi",
+        background=BackgroundTask(_delete_file, midi_path),
+    )
+
+
+@app.post("/generate")
+def generate(request: GenerateRequest):
+    pattern = _build_pattern(request)
 
     file_descriptor, midi_path = tempfile.mkstemp(suffix=".mid")
     os.close(file_descriptor)

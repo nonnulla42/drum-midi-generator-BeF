@@ -1,6 +1,18 @@
 import { FormEvent, useEffect, useState } from "react";
 
-import { fetchPresets, generateMidi, type GenerateMidiInput, type Preset } from "./api";
+import {
+  addPatternBaseHit,
+  exportPatternMidi,
+  fetchPresets,
+  generateMidi,
+  generatePattern,
+  movePatternHit,
+  removePatternHit,
+  type GenerateMidiInput,
+  type GeneratedPattern,
+  type PatternEvent,
+  type Preset,
+} from "./api";
 
 const CUSTOM_PRESET_ID = "custom";
 
@@ -84,6 +96,18 @@ const DIVISION_OPTIONS = [
   { value: "sixteenth", label: "Sixteenth" },
 ] as const;
 
+const INSTRUMENT_LABELS: Record<string, string> = {
+  kick: "Kick",
+  snare: "Snare",
+  hihat_closed: "Hi-Hat Closed",
+  hihat_open: "Hi-Hat Open",
+  ride: "Ride",
+  crash: "Crash",
+  tom_high: "Tom High",
+  tom_mid: "Tom Mid",
+  tom_low: "Tom Low",
+};
+
 function normalizeGrouping(value: string): string {
   return value.trim().replace(/\s+/g, "");
 }
@@ -113,6 +137,57 @@ function timeSignatureFromGrouping(value: string): string {
     .reduce((sum, part) => sum + Number(part), 0);
 
   return `${numerator}/4`;
+}
+
+function numeratorFromGrouping(value: string): number | null {
+  if (groupingError(value)) {
+    return null;
+  }
+
+  return normalizeGrouping(value)
+    .split("+")
+    .reduce((sum, part) => sum + Number(part), 0);
+}
+
+function hitPriority(hitType: PatternEvent["hit_type"]): number {
+  if (hitType === "accent") {
+    return 0;
+  }
+  if (hitType === "main") {
+    return 1;
+  }
+  return 2;
+}
+
+function buildGridRows(pattern: GeneratedPattern) {
+  const fillLookup = new Set(pattern.fill_regions.flatMap((region) => region.slots.map((slot) => `${region.bar}:${slot}`)));
+
+  return pattern.instrument_order.map((instrument) => {
+    const cellMap = new Map<string, PatternEvent>();
+    for (const event of pattern.events[instrument] ?? []) {
+      const key = `${event.bar}:${event.slot}`;
+      const existing = cellMap.get(key);
+      if (!existing || hitPriority(event.hit_type) < hitPriority(existing.hit_type)) {
+        cellMap.set(key, event);
+      }
+    }
+
+    const bars = Array.from({ length: pattern.meta.bars }, (_, barIndex) =>
+      Array.from({ length: pattern.meta.slots_per_bar }, (_, slotIndex) => {
+        const key = `${barIndex}:${slotIndex}`;
+        return {
+          event: cellMap.get(key) ?? null,
+          fillActive: fillLookup.has(key),
+        };
+      }),
+    );
+
+    return {
+      instrument,
+      label: INSTRUMENT_LABELS[instrument] ?? instrument,
+      bars,
+    };
+  });
 }
 
 function App() {
@@ -177,8 +252,17 @@ function App() {
   const [tomsLowHits, setTomsLowHits] = useState(DEFAULT_TOMS.lowHits);
   const [tomsVelocityMin, setTomsVelocityMin] = useState(DEFAULT_TOMS.velocityMin);
   const [tomsVelocityMax, setTomsVelocityMax] = useState(DEFAULT_TOMS.velocityMax);
+  const [pattern, setPattern] = useState<GeneratedPattern | null>(null);
   const [isLoadingPresets, setIsLoadingPresets] = useState(true);
+  const [isGeneratingPattern, setIsGeneratingPattern] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isEditingPattern, setIsEditingPattern] = useState(false);
+  const [dragState, setDragState] = useState<{
+    instrument: string;
+    bar: number;
+    slot: number;
+    hitType: PatternEvent["hit_type"];
+  } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [generateError, setGenerateError] = useState("");
 
@@ -199,6 +283,7 @@ function App() {
   const tomsVelocityError =
     tomsVelocityMax < tomsVelocityMin ? "Toms velocity max must be greater than or equal to min." : "";
   const timeSignature = timeSignatureFromGrouping(grouping);
+  const gridRows = pattern ? buildGridRows(pattern) : [];
 
   useEffect(() => {
     let isMounted = true;
@@ -239,6 +324,7 @@ function App() {
     if (selectedPreset !== CUSTOM_PRESET_ID) {
       setSelectedPreset(CUSTOM_PRESET_ID);
     }
+    setPattern(null);
   }
 
   function applyPreset(preset: Preset) {
@@ -290,12 +376,14 @@ function App() {
     setTomsLowHits(preset.toms.low_hits);
     setTomsVelocityMin(preset.toms.velocity_min);
     setTomsVelocityMax(preset.toms.velocity_max);
+    setPattern(null);
     setGenerateError("");
   }
 
   function handlePresetChange(value: string) {
     if (value === CUSTOM_PRESET_ID) {
       setSelectedPreset(CUSTOM_PRESET_ID);
+      setPattern(null);
       return;
     }
 
@@ -305,43 +393,180 @@ function App() {
     }
   }
 
-  async function handleGenerate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-
+  function getValidationError() {
     if (!selectedPreset) {
-      setGenerateError("Select a preset before generating.");
-      return;
+      return "Select a preset before generating.";
     }
     if (currentGroupingError) {
-      setGenerateError(currentGroupingError);
-      return;
+      return currentGroupingError;
     }
     if (kickVelocityError) {
-      setGenerateError(kickVelocityError);
-      return;
+      return kickVelocityError;
     }
     if (snareVelocityError) {
-      setGenerateError(snareVelocityError);
-      return;
+      return snareVelocityError;
     }
     if (hihatClosedVelocityError) {
-      setGenerateError(hihatClosedVelocityError);
-      return;
+      return hihatClosedVelocityError;
     }
     if (rideVelocityError) {
-      setGenerateError(rideVelocityError);
-      return;
+      return rideVelocityError;
     }
     if (hihatOpenVelocityError) {
-      setGenerateError(hihatOpenVelocityError);
-      return;
+      return hihatOpenVelocityError;
     }
     if (crashVelocityError) {
-      setGenerateError(crashVelocityError);
-      return;
+      return crashVelocityError;
     }
     if (tomsVelocityError) {
-      setGenerateError(tomsVelocityError);
+      return tomsVelocityError;
+    }
+    return "";
+  }
+
+  function buildRequest(): GenerateMidiInput {
+    return {
+      bpm,
+      bars,
+      grouping: normalizeGrouping(grouping),
+      swing,
+      humanize_timing: humanizeTiming,
+      humanize_velocity: humanizeVelocity,
+      bar_similarity: barSimilarity,
+      fill_intensity: fillIntensity,
+      fill_length: fillLength,
+      fill_every: fillEvery,
+      kick_enabled: kickEnabled,
+      kick_density: kickDensity,
+      kick_syncopation: kickSyncopation,
+      kick_timing_feel: kickTimingFeel,
+      kick_velocity_min: kickVelocityMin,
+      kick_velocity_max: kickVelocityMax,
+      snare_enabled: snareEnabled,
+      snare_density: snareDensity,
+      snare_syncopation: snareSyncopation,
+      snare_timing_feel: snareTimingFeel,
+      snare_velocity_min: snareVelocityMin,
+      snare_velocity_max: snareVelocityMax,
+      hihat_closed_enabled: hihatClosedEnabled,
+      hihat_closed_division: hihatClosedDivision,
+      hihat_closed_space: hihatClosedSpace,
+      hihat_closed_timing_feel: hihatClosedTimingFeel,
+      hihat_closed_velocity_min: hihatClosedVelocityMin,
+      hihat_closed_velocity_max: hihatClosedVelocityMax,
+      ride_enabled: rideEnabled,
+      ride_division: rideDivision,
+      ride_space: rideSpace,
+      ride_timing_feel: rideTimingFeel,
+      ride_velocity_min: rideVelocityMin,
+      ride_velocity_max: rideVelocityMax,
+      hihat_open_enabled: hihatOpenEnabled,
+      hihat_open_density: hihatOpenDensity,
+      hihat_open_velocity_min: hihatOpenVelocityMin,
+      hihat_open_velocity_max: hihatOpenVelocityMax,
+      crash_enabled: crashEnabled,
+      crash_density: crashDensity,
+      crash_velocity_min: crashVelocityMin,
+      crash_velocity_max: crashVelocityMax,
+      toms_high_hits: tomsHighHits,
+      toms_mid_hits: tomsMidHits,
+      toms_low_hits: tomsLowHits,
+      toms_velocity_min: tomsVelocityMin,
+      toms_velocity_max: tomsVelocityMax,
+    };
+  }
+
+  async function handleGridCellClick(instrument: string, barIndex: number, slotIndex: number, event: PatternEvent | null) {
+    if (!pattern || isEditingPattern) {
+      return;
+    }
+
+    setGenerateError("");
+    setIsEditingPattern(true);
+
+    try {
+      const nextPattern = event
+        ? await removePatternHit({
+            pattern,
+            instrument,
+            bar: barIndex,
+            slot: slotIndex,
+          })
+        : await addPatternBaseHit({
+            pattern,
+            instrument,
+            bar: barIndex,
+            slot: slotIndex,
+          });
+      setPattern(nextPattern);
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Failed to edit pattern.");
+    } finally {
+      setIsEditingPattern(false);
+    }
+  }
+
+  async function handleGridDrop(instrument: string, barIndex: number, slotIndex: number) {
+    if (!pattern || !dragState || isEditingPattern) {
+      return;
+    }
+    if (dragState.instrument !== instrument) {
+      setDragState(null);
+      return;
+    }
+    if (dragState.bar === barIndex && dragState.slot === slotIndex) {
+      setDragState(null);
+      return;
+    }
+
+    setGenerateError("");
+    setIsEditingPattern(true);
+
+    try {
+      const nextPattern = await movePatternHit({
+        pattern,
+        instrument,
+        from_bar: dragState.bar,
+        from_slot: dragState.slot,
+        to_bar: barIndex,
+        to_slot: slotIndex,
+        hit_type: dragState.hitType,
+      });
+      setPattern(nextPattern);
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Failed to move hit.");
+    } finally {
+      setDragState(null);
+      setIsEditingPattern(false);
+    }
+  }
+
+  async function handleGeneratePattern(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const validationError = getValidationError();
+    if (validationError) {
+      setGenerateError(validationError);
+      return;
+    }
+
+    setGenerateError("");
+    setIsGeneratingPattern(true);
+
+    try {
+      const nextPattern = await generatePattern(buildRequest());
+      setPattern(nextPattern);
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Failed to generate pattern.");
+    } finally {
+      setIsGeneratingPattern(false);
+    }
+  }
+
+  async function handleDownloadMidi() {
+    const validationError = getValidationError();
+    if (validationError) {
+      setGenerateError(validationError);
       return;
     }
 
@@ -349,57 +574,7 @@ function App() {
     setIsGenerating(true);
 
     try {
-      const request: GenerateMidiInput = {
-        bpm,
-        bars,
-        grouping: normalizeGrouping(grouping),
-        swing,
-        humanize_timing: humanizeTiming,
-        humanize_velocity: humanizeVelocity,
-        bar_similarity: barSimilarity,
-        fill_intensity: fillIntensity,
-        fill_length: fillLength,
-        fill_every: fillEvery,
-        kick_enabled: kickEnabled,
-        kick_density: kickDensity,
-        kick_syncopation: kickSyncopation,
-        kick_timing_feel: kickTimingFeel,
-        kick_velocity_min: kickVelocityMin,
-        kick_velocity_max: kickVelocityMax,
-        snare_enabled: snareEnabled,
-        snare_density: snareDensity,
-        snare_syncopation: snareSyncopation,
-        snare_timing_feel: snareTimingFeel,
-        snare_velocity_min: snareVelocityMin,
-        snare_velocity_max: snareVelocityMax,
-        hihat_closed_enabled: hihatClosedEnabled,
-        hihat_closed_division: hihatClosedDivision,
-        hihat_closed_space: hihatClosedSpace,
-        hihat_closed_timing_feel: hihatClosedTimingFeel,
-        hihat_closed_velocity_min: hihatClosedVelocityMin,
-        hihat_closed_velocity_max: hihatClosedVelocityMax,
-        ride_enabled: rideEnabled,
-        ride_division: rideDivision,
-        ride_space: rideSpace,
-        ride_timing_feel: rideTimingFeel,
-        ride_velocity_min: rideVelocityMin,
-        ride_velocity_max: rideVelocityMax,
-        hihat_open_enabled: hihatOpenEnabled,
-        hihat_open_density: hihatOpenDensity,
-        hihat_open_velocity_min: hihatOpenVelocityMin,
-        hihat_open_velocity_max: hihatOpenVelocityMax,
-        crash_enabled: crashEnabled,
-        crash_density: crashDensity,
-        crash_velocity_min: crashVelocityMin,
-        crash_velocity_max: crashVelocityMax,
-        toms_high_hits: tomsHighHits,
-        toms_mid_hits: tomsMidHits,
-        toms_low_hits: tomsLowHits,
-        toms_velocity_min: tomsVelocityMin,
-        toms_velocity_max: tomsVelocityMax,
-      };
-
-      const blob = await generateMidi(request);
+      const blob = pattern ? await exportPatternMidi(pattern) : await generateMidi(buildRequest());
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -417,7 +592,7 @@ function App() {
 
   return (
     <main className="page-shell">
-      <form className="app-layout" onSubmit={handleGenerate}>
+      <form className="app-layout" onSubmit={handleGeneratePattern}>
         <aside className="sidebar card">
           <header className="hero">
             <h1>GhostGroove</h1>
@@ -630,24 +805,51 @@ function App() {
             {tomsVelocityError ? <p className="message error">{tomsVelocityError}</p> : null}
             {generateError ? <p className="message error">{generateError}</p> : null}
 
-            <button
-              type="submit"
-              disabled={
-                isLoadingPresets ||
-                isGenerating ||
-                !selectedPreset ||
-                Boolean(currentGroupingError) ||
-                Boolean(kickVelocityError) ||
-                Boolean(snareVelocityError) ||
-                Boolean(hihatClosedVelocityError) ||
-                Boolean(rideVelocityError) ||
-                Boolean(hihatOpenVelocityError) ||
-                Boolean(crashVelocityError) ||
-                Boolean(tomsVelocityError)
-              }
-            >
-              {isGenerating ? "Generating..." : "Generate MIDI"}
-            </button>
+            <div className="action-group">
+              <button
+                type="submit"
+                disabled={
+                  isLoadingPresets ||
+                  isGeneratingPattern ||
+                  isGenerating ||
+                  isEditingPattern ||
+                  !selectedPreset ||
+                  Boolean(currentGroupingError) ||
+                  Boolean(kickVelocityError) ||
+                  Boolean(snareVelocityError) ||
+                  Boolean(hihatClosedVelocityError) ||
+                  Boolean(rideVelocityError) ||
+                  Boolean(hihatOpenVelocityError) ||
+                  Boolean(crashVelocityError) ||
+                  Boolean(tomsVelocityError)
+                }
+              >
+                {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
+              </button>
+
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => void handleDownloadMidi()}
+                disabled={
+                  isLoadingPresets ||
+                  isGeneratingPattern ||
+                  isGenerating ||
+                  isEditingPattern ||
+                  !selectedPreset ||
+                  Boolean(currentGroupingError) ||
+                  Boolean(kickVelocityError) ||
+                  Boolean(snareVelocityError) ||
+                  Boolean(hihatClosedVelocityError) ||
+                  Boolean(rideVelocityError) ||
+                  Boolean(hihatOpenVelocityError) ||
+                  Boolean(crashVelocityError) ||
+                  Boolean(tomsVelocityError)
+                }
+              >
+                {isGenerating ? "Downloading MIDI..." : pattern ? "Download Edited MIDI" : "Download MIDI"}
+              </button>
+            </div>
           </div>
         </aside>
 
@@ -1320,6 +1522,96 @@ function App() {
               </section>
             </aside>
           </div>
+
+          <section className="pattern-grid-card card">
+            <div className="pattern-grid-head">
+              <h3>Pattern Grid</h3>
+              <p>
+                Click a filled cell to remove the visible hit, click an empty cell to add a manual main hit, and drag
+                horizontally on the same row to move hits.
+              </p>
+            </div>
+
+            {pattern ? (
+              <div className="pattern-grid-scroll">
+                <div className="pattern-grid">
+                  {gridRows.map((row) => (
+                    <div key={row.instrument} className="pattern-row">
+                      <div className="pattern-row-label">{row.label}</div>
+
+                      <div className="pattern-row-bars">
+                        {row.bars.map((bar, barIndex) => (
+                          <div
+                            key={`${row.instrument}-${barIndex}`}
+                            className="pattern-bar"
+                            style={{ gridTemplateColumns: `repeat(${pattern.meta.slots_per_bar}, minmax(14px, 1fr))` }}
+                          >
+                            {bar.map((cell, slotIndex) => {
+                              const numerator = numeratorFromGrouping(pattern.meta.grouping) ?? 4;
+                              const quarterSize = pattern.meta.slots_per_bar / numerator;
+                              const className = [
+                                "pattern-cell",
+                                cell.fillActive ? "pattern-cell-fill" : "",
+                                cell.event ? `pattern-cell-${cell.event.hit_type}` : "",
+                                slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
+                                slotIndex % 2 === 0 ? "pattern-cell-even" : "",
+                                quarterSize > 0 && slotIndex % quarterSize === 0 ? "pattern-cell-quarter" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ");
+
+                              return (
+                                <div
+                                  key={`${row.instrument}-${barIndex}-${slotIndex}`}
+                                  className={className}
+                                  onClick={() => void handleGridCellClick(row.instrument, barIndex, slotIndex, cell.event)}
+                                  draggable={Boolean(cell.event) && !isEditingPattern}
+                                  onDragStart={() => {
+                                    if (!cell.event) {
+                                      return;
+                                    }
+                                    setDragState({
+                                      instrument: row.instrument,
+                                      bar: barIndex,
+                                      slot: slotIndex,
+                                      hitType: cell.event.hit_type,
+                                    });
+                                  }}
+                                  onDragOver={(dragEvent) => {
+                                    if (dragState?.instrument === row.instrument) {
+                                      dragEvent.preventDefault();
+                                    }
+                                  }}
+                                  onDrop={(dragEvent) => {
+                                    dragEvent.preventDefault();
+                                    void handleGridDrop(row.instrument, barIndex, slotIndex);
+                                  }}
+                                  onDragEnd={() => {
+                                    setDragState(null);
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                  title={
+                                    cell.event
+                                      ? `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1} | ${cell.event.hit_type} | velocity ${cell.event.velocity} | offset ${cell.event.offset}`
+                                      : `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1}`
+                                  }
+                                />
+                              );
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="pattern-empty">
+                <p>Generate a pattern to inspect the exact events coming back from the backend.</p>
+              </div>
+            )}
+          </section>
         </section>
       </form>
     </main>
