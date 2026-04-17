@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 import {
   addPatternBaseHit,
@@ -13,6 +13,7 @@ import {
   type PatternEvent,
   type Preset,
 } from "./api";
+import { PatternPlayer } from "./playback";
 
 const CUSTOM_PRESET_ID = "custom";
 
@@ -190,6 +191,17 @@ function buildGridRows(pattern: GeneratedPattern) {
   });
 }
 
+function velocityColor(velocity: number): string {
+  const clamped = Math.max(1, Math.min(127, velocity));
+  const t = (clamped - 1) / 126;
+  const start = { r: 186, g: 239, b: 174 };
+  const end = { r: 111, g: 76, b: 214 };
+  const r = Math.round(start.r + (end.r - start.r) * t);
+  const g = Math.round(start.g + (end.g - start.g) * t);
+  const b = Math.round(start.b + (end.b - start.b) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 function App() {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState(CUSTOM_PRESET_ID);
@@ -257,6 +269,9 @@ function App() {
   const [isGeneratingPattern, setIsGeneratingPattern] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isEditingPattern, setIsEditingPattern] = useState(false);
+  const [isEditGridEnabled, setIsEditGridEnabled] = useState(true);
+  const [isLoopEnabled, setIsLoopEnabled] = useState(true);
+  const [playbackStatus, setPlaybackStatus] = useState<"Stopped" | "Playing">("Stopped");
   const [dragState, setDragState] = useState<{
     instrument: string;
     bar: number;
@@ -265,6 +280,7 @@ function App() {
   } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [generateError, setGenerateError] = useState("");
+  const patternPlayerRef = useRef<PatternPlayer | null>(null);
 
   const currentGroupingError = groupingError(grouping);
   const kickVelocityError =
@@ -320,10 +336,29 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      patternPlayerRef.current?.stop();
+    };
+  }, []);
+
+  function getPatternPlayer() {
+    if (!patternPlayerRef.current) {
+      patternPlayerRef.current = new PatternPlayer();
+    }
+    return patternPlayerRef.current;
+  }
+
+  function stopPlaybackStatefully() {
+    patternPlayerRef.current?.stop();
+    setPlaybackStatus("Stopped");
+  }
+
   function switchToCustomIfNeeded() {
     if (selectedPreset !== CUSTOM_PRESET_ID) {
       setSelectedPreset(CUSTOM_PRESET_ID);
     }
+    stopPlaybackStatefully();
     setPattern(null);
   }
 
@@ -376,6 +411,7 @@ function App() {
     setTomsLowHits(preset.toms.low_hits);
     setTomsVelocityMin(preset.toms.velocity_min);
     setTomsVelocityMax(preset.toms.velocity_max);
+    stopPlaybackStatefully();
     setPattern(null);
     setGenerateError("");
   }
@@ -383,6 +419,7 @@ function App() {
   function handlePresetChange(value: string) {
     if (value === CUSTOM_PRESET_ID) {
       setSelectedPreset(CUSTOM_PRESET_ID);
+      stopPlaybackStatefully();
       setPattern(null);
       return;
     }
@@ -477,7 +514,7 @@ function App() {
   }
 
   async function handleGridCellClick(instrument: string, barIndex: number, slotIndex: number, event: PatternEvent | null) {
-    if (!pattern || isEditingPattern) {
+    if (!pattern || isEditingPattern || !isEditGridEnabled) {
       return;
     }
 
@@ -507,7 +544,7 @@ function App() {
   }
 
   async function handleGridDrop(instrument: string, barIndex: number, slotIndex: number) {
-    if (!pattern || !dragState || isEditingPattern) {
+    if (!pattern || !dragState || isEditingPattern || !isEditGridEnabled) {
       return;
     }
     if (dragState.instrument !== instrument) {
@@ -587,6 +624,42 @@ function App() {
       setGenerateError(error instanceof Error ? error.message : "Failed to generate MIDI.");
     } finally {
       setIsGenerating(false);
+    }
+  }
+
+  async function handlePlay() {
+    if (!pattern) {
+      setGenerateError("Generate a pattern before playback.");
+      return;
+    }
+
+    setGenerateError("");
+    try {
+      await getPatternPlayer().play(pattern, isLoopEnabled);
+      setPlaybackStatus("Playing");
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Failed to start playback.");
+      setPlaybackStatus("Stopped");
+    }
+  }
+
+  function handleStop() {
+    stopPlaybackStatefully();
+  }
+
+  async function handleRestart() {
+    if (!pattern) {
+      setGenerateError("Generate a pattern before restarting playback.");
+      return;
+    }
+
+    setGenerateError("");
+    try {
+      await getPatternPlayer().restart();
+      setPlaybackStatus("Playing");
+    } catch (error) {
+      setGenerateError(error instanceof Error ? error.message : "Failed to restart playback.");
+      setPlaybackStatus("Stopped");
     }
   }
 
@@ -806,6 +879,67 @@ function App() {
             {generateError ? <p className="message error">{generateError}</p> : null}
 
             <div className="action-group">
+              <div className="section">
+                <h2>Playback</h2>
+
+                <div className="playback-actions">
+                  <button
+                    type="button"
+                    onClick={() => void handlePlay()}
+                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isEditingPattern}
+                  >
+                    Play
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={handleStop}
+                    disabled={playbackStatus !== "Playing"}
+                  >
+                    Stop
+                  </button>
+
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={() => void handleRestart()}
+                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isEditingPattern}
+                  >
+                    Restart
+                  </button>
+                </div>
+
+                <label className="field-checkbox field-checkbox-panel">
+                  <input
+                    type="checkbox"
+                    checked={isLoopEnabled}
+                    onChange={(event) => {
+                      const nextValue = event.target.checked;
+                      setIsLoopEnabled(nextValue);
+                      getPatternPlayer().setLoopEnabled(nextValue);
+                    }}
+                  />
+                  <span>Loop</span>
+                </label>
+
+                <p className="message">Playback: {playbackStatus}</p>
+              </div>
+
+              <label className="field-checkbox field-checkbox-panel">
+                <input
+                  type="checkbox"
+                  checked={isEditGridEnabled}
+                  onChange={(event) => {
+                    setIsEditGridEnabled(event.target.checked);
+                    if (!event.target.checked) {
+                      setDragState(null);
+                    }
+                  }}
+                />
+                <span>Edit Grid</span>
+              </label>
+
               <button
                 type="submit"
                 disabled={
@@ -1527,13 +1661,14 @@ function App() {
             <div className="pattern-grid-head">
               <h3>Pattern Grid</h3>
               <p>
-                Click a filled cell to remove the visible hit, click an empty cell to add a manual main hit, and drag
-                horizontally on the same row to move hits.
+                {isEditGridEnabled
+                  ? "Click a filled cell to remove the visible hit, click an empty cell to add a manual main hit, and drag horizontally on the same row to move hits."
+                  : "Grid editing is off. Inspect the generated pattern visually without changing it."}
               </p>
             </div>
 
             {pattern ? (
-              <div className="pattern-grid-scroll">
+              <div className={`pattern-grid-scroll ${isEditGridEnabled ? "" : "pattern-grid-scroll-locked"}`}>
                 <div className="pattern-grid">
                   {gridRows.map((row) => (
                     <div key={row.instrument} className="pattern-row">
@@ -1549,10 +1684,15 @@ function App() {
                             {bar.map((cell, slotIndex) => {
                               const numerator = numeratorFromGrouping(pattern.meta.grouping) ?? 4;
                               const quarterSize = pattern.meta.slots_per_bar / numerator;
+                              const style =
+                                cell.event && cell.event.hit_type !== "ghost"
+                                  ? { backgroundColor: velocityColor(cell.event.velocity) }
+                                  : undefined;
                               const className = [
                                 "pattern-cell",
                                 cell.fillActive ? "pattern-cell-fill" : "",
                                 cell.event ? `pattern-cell-${cell.event.hit_type}` : "",
+                                cell.event && !isEditGridEnabled ? "pattern-cell-readonly" : "",
                                 slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
                                 slotIndex % 2 === 0 ? "pattern-cell-even" : "",
                                 quarterSize > 0 && slotIndex % quarterSize === 0 ? "pattern-cell-quarter" : "",
@@ -1564,10 +1704,11 @@ function App() {
                                 <div
                                   key={`${row.instrument}-${barIndex}-${slotIndex}`}
                                   className={className}
+                                  style={style}
                                   onClick={() => void handleGridCellClick(row.instrument, barIndex, slotIndex, cell.event)}
-                                  draggable={Boolean(cell.event) && !isEditingPattern}
+                                  draggable={Boolean(cell.event) && !isEditingPattern && isEditGridEnabled}
                                   onDragStart={() => {
-                                    if (!cell.event) {
+                                    if (!cell.event || !isEditGridEnabled) {
                                       return;
                                     }
                                     setDragState({
@@ -1578,7 +1719,7 @@ function App() {
                                     });
                                   }}
                                   onDragOver={(dragEvent) => {
-                                    if (dragState?.instrument === row.instrument) {
+                                    if (isEditGridEnabled && dragState?.instrument === row.instrument) {
                                       dragEvent.preventDefault();
                                     }
                                   }}
@@ -1596,7 +1737,15 @@ function App() {
                                       ? `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1} | ${cell.event.hit_type} | velocity ${cell.event.velocity} | offset ${cell.event.offset}`
                                       : `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1}`
                                   }
-                                />
+                                >
+                                  {cell.event && cell.event.offset !== 0 ? (
+                                    <span
+                                      className={`pattern-offset pattern-offset-${cell.event.offset < 0 ? "left" : "right"}`}
+                                    >
+                                      {Math.abs(cell.event.offset)}
+                                    </span>
+                                  ) : null}
+                                </div>
                               );
                             })}
                           </div>

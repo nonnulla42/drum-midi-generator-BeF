@@ -1,8 +1,10 @@
 import os
 import tempfile
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -29,6 +31,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/assets/drums", StaticFiles(directory=Path(__file__).resolve().parent / "assets" / "drums"), name="drum-assets")
 
 
 class GenerateRequest(BaseModel):
