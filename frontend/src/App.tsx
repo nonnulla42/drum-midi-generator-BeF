@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
 
 import {
   addPatternBaseHit,
@@ -134,6 +134,18 @@ const INSTRUMENT_LABELS: Record<string, string> = {
   tom_low: "Tom Low",
 };
 
+const PLACEHOLDER_GRID_INSTRUMENTS = [
+  "kick",
+  "snare",
+  "hihat_closed",
+  "hihat_open",
+  "ride",
+  "crash",
+  "tom_high",
+  "tom_mid",
+  "tom_low",
+];
+
 function normalizeGrouping(value: string): string {
   return value.trim().replace(/\s+/g, "");
 }
@@ -216,6 +228,19 @@ function buildGridRows(pattern: GeneratedPattern) {
   });
 }
 
+function buildPlaceholderGridRows() {
+  return PLACEHOLDER_GRID_INSTRUMENTS.map((instrument) => ({
+    instrument,
+    label: INSTRUMENT_LABELS[instrument] ?? instrument,
+    bars: [
+      Array.from({ length: 32 }, () => ({
+        event: null,
+        fillActive: false,
+      })),
+    ],
+  }));
+}
+
 function velocityColor(velocity: number): string {
   const clamped = Math.max(1, Math.min(127, velocity));
   const t = (clamped - 1) / 126;
@@ -225,6 +250,459 @@ function velocityColor(velocity: number): string {
   const g = Math.round(start.g + (end.g - start.g) * t);
   const b = Math.round(start.b + (end.b - start.b) * t);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+function clampValue(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function snapToStep(value: number, min: number, step: number): number {
+  const steps = Math.round((value - min) / step);
+  return Number((min + steps * step).toFixed(4));
+}
+
+function formatKnobValue(value: number): string {
+  return value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+type KnobControlProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+};
+
+function KnobControl({ label, value, min, max, step, onChange }: KnobControlProps) {
+  const dragStateRef = useRef<{ pointerId: number; startY: number; startValue: number } | null>(null);
+  const normalized = (value - min) / (max - min);
+  const angle = -135 + normalized * 270;
+
+  function commitValue(nextValue: number) {
+    onChange(snapToStep(clampValue(nextValue, min, max), min, step));
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startValue: value,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const deltaY = dragState.startY - event.clientY;
+    const sensitivity = (max - min) / 140;
+    commitValue(dragState.startValue + deltaY * sensitivity);
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (dragStateRef.current?.pointerId === event.pointerId) {
+      dragStateRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowUp" || event.key === "ArrowRight") {
+      event.preventDefault();
+      commitValue(value + step);
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      commitValue(value - step);
+      return;
+    }
+
+    if (event.key === "PageUp") {
+      event.preventDefault();
+      commitValue(value + step * 5);
+      return;
+    }
+
+    if (event.key === "PageDown") {
+      event.preventDefault();
+      commitValue(value - step * 5);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      commitValue(min);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      commitValue(max);
+    }
+  }
+
+  return (
+    <div className="knob-control">
+      <div className="knob-control-head">
+        <span>{label}</span>
+        <output className="knob-control-readout">{formatKnobValue(value)}</output>
+      </div>
+
+      <div
+        className="knob"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-valuetext={formatKnobValue(value)}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={() => {
+          dragStateRef.current = null;
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        <div className="knob-face">
+          <span className="knob-indicator" style={{ transform: `translateX(-50%) rotate(${angle}deg)` }} />
+          <span className="knob-value">{formatKnobValue(value)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type SteppedSliderOption = {
+  value: number;
+  label: string;
+};
+
+type SteppedSliderControlProps = {
+  label: string;
+  value: number;
+  options: SteppedSliderOption[];
+  onChange: (value: number) => void;
+};
+
+function SteppedSliderControl({ label, value, options, onChange }: SteppedSliderControlProps) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerIdRef = useRef<number | null>(null);
+  const activeIndex = Math.max(0, options.findIndex((option) => option.value === value));
+  const activeOption = options[activeIndex] ?? options[0];
+  const handlePercent = options.length > 1 ? (activeIndex / (options.length - 1)) * 100 : 0;
+
+  function valueFromClientX(clientX: number): number {
+    const track = trackRef.current;
+    if (!track) {
+      return activeOption.value;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const ratio = clampValue((clientX - rect.left) / rect.width, 0, 1);
+    const index = Math.round(ratio * (options.length - 1));
+    return options[index]?.value ?? activeOption.value;
+  }
+
+  function commitFromClientX(clientX: number) {
+    onChange(valueFromClientX(clientX));
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    dragPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    commitFromClientX(event.clientX);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    commitFromClientX(event.clientX);
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current === event.pointerId) {
+      dragPointerIdRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      onChange(options[Math.min(activeIndex + 1, options.length - 1)]?.value ?? activeOption.value);
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      onChange(options[Math.max(activeIndex - 1, 0)]?.value ?? activeOption.value);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      onChange(options[0]?.value ?? activeOption.value);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      onChange(options[options.length - 1]?.value ?? activeOption.value);
+    }
+  }
+
+  return (
+    <div className="field">
+      <div className="plugin-control-head">
+        <span>{label}</span>
+        <output className="plugin-control-readout">{activeOption.label}</output>
+      </div>
+
+      <div
+        ref={trackRef}
+        className="stepped-slider"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={options[0]?.value ?? 0}
+        aria-valuemax={options[options.length - 1]?.value ?? 0}
+        aria-valuenow={activeOption.value}
+        aria-valuetext={activeOption.label}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={() => {
+          dragPointerIdRef.current = null;
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        <div className="stepped-slider-track">
+          <div className="stepped-slider-fill" style={{ width: `${handlePercent}%` }} />
+          {options.map((option, index) => {
+            const tickPercent = options.length > 1 ? (index / (options.length - 1)) * 100 : 0;
+            const isActive = option.value <= activeOption.value;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={option.value === activeOption.value ? "stepped-slider-tick stepped-slider-tick-active" : "stepped-slider-tick"}
+                style={{ left: `${tickPercent}%` }}
+                aria-label={option.label}
+                aria-pressed={option.value === activeOption.value}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onChange(option.value);
+                }}
+                data-filled={isActive ? "true" : "false"}
+              />
+            );
+          })}
+          <div className="stepped-slider-handle" style={{ left: `${handlePercent}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type TimingFeelControlProps = {
+  value: (typeof TIMING_FEEL_OPTIONS)[number]["value"];
+  onChange: (value: (typeof TIMING_FEEL_OPTIONS)[number]["value"]) => void;
+};
+
+const TIMING_FEEL_VISUAL_OPTIONS = [
+  { value: "push", label: "Push", shape: "left" },
+  { value: "drag", label: "Drag", shape: "right" },
+  { value: "neutral", label: "Neutral", shape: "center" },
+  { value: "random", label: "Random", shape: "center random" },
+] as const;
+
+function TimingFeelControl({ value, onChange }: TimingFeelControlProps) {
+  return (
+    <div className="field">
+      <div className="plugin-control-head">
+        <span>Timing Feel</span>
+      </div>
+
+      <div className="timing-feel-control" role="group" aria-label="Kick timing feel">
+        {TIMING_FEEL_VISUAL_OPTIONS.map((option) => {
+          const isActive = option.value === value;
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={isActive ? `timing-feel-button timing-feel-button-${option.shape} timing-feel-button-active` : `timing-feel-button timing-feel-button-${option.shape}`}
+              aria-pressed={isActive}
+              onClick={() => onChange(option.value)}
+            >
+              <span className="timing-feel-button-label">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type VelocityRangeControlProps = {
+  label: string;
+  minValue: number;
+  maxValue: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (nextMin: number, nextMax: number) => void;
+};
+
+function VelocityRangeControl({ label, minValue, maxValue, min, max, step, onChange }: VelocityRangeControlProps) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dragHandleRef = useRef<"min" | "max" | null>(null);
+  const range = max - min;
+  const minPercent = range > 0 ? ((minValue - min) / range) * 100 : 0;
+  const maxPercent = range > 0 ? ((maxValue - min) / range) * 100 : 100;
+
+  function snapClientX(clientX: number): number {
+    const track = trackRef.current;
+    if (!track) {
+      return minValue;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const ratio = clampValue((clientX - rect.left) / rect.width, 0, 1);
+    const rawValue = min + ratio * range;
+    return snapToStep(clampValue(rawValue, min, max), min, step);
+  }
+
+  function commit(handle: "min" | "max", nextValue: number) {
+    if (handle === "min") {
+      onChange(clampValue(nextValue, min, maxValue), maxValue);
+      return;
+    }
+
+    onChange(minValue, clampValue(nextValue, minValue, max));
+  }
+
+  function handleTrackPointerDown(event: PointerEvent<HTMLDivElement>) {
+    const nextValue = snapClientX(event.clientX);
+    const distanceToMin = Math.abs(nextValue - minValue);
+    const distanceToMax = Math.abs(nextValue - maxValue);
+    const targetHandle = distanceToMin <= distanceToMax ? "min" : "max";
+
+    dragHandleRef.current = targetHandle;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    commit(targetHandle, nextValue);
+  }
+
+  function handleTrackPointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!dragHandleRef.current) {
+      return;
+    }
+
+    commit(dragHandleRef.current, snapClientX(event.clientX));
+  }
+
+  function handleTrackPointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (dragHandleRef.current) {
+      dragHandleRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleHandleKeyDown(handle: "min" | "max", event: KeyboardEvent<HTMLButtonElement>) {
+    const currentValue = handle === "min" ? minValue : maxValue;
+
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      commit(handle, currentValue + step);
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      commit(handle, currentValue - step);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      commit(handle, handle === "min" ? min : minValue);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      commit(handle, handle === "min" ? maxValue : max);
+    }
+  }
+
+  return (
+    <div className="field">
+      <div className="velocity-range">
+        <div
+          ref={trackRef}
+          className="velocity-range-slider"
+          onPointerDown={handleTrackPointerDown}
+          onPointerMove={handleTrackPointerMove}
+          onPointerUp={handleTrackPointerUp}
+          onPointerCancel={handleTrackPointerUp}
+          onLostPointerCapture={() => {
+            dragHandleRef.current = null;
+          }}
+        >
+          <div className="velocity-range-track" />
+          <div
+            className="velocity-range-active"
+            style={{ left: `${minPercent}%`, width: `${Math.max(maxPercent - minPercent, 0)}%` }}
+          />
+
+          <button
+            type="button"
+            className="velocity-range-handle velocity-range-handle-min"
+            style={{ left: `${minPercent}%` }}
+            role="slider"
+            aria-label={`${label} minimum`}
+            aria-valuemin={min}
+            aria-valuemax={maxValue}
+            aria-valuenow={minValue}
+            aria-valuetext={`Min ${minValue}`}
+            onKeyDown={(event) => handleHandleKeyDown("min", event)}
+          />
+
+          <button
+            type="button"
+            className="velocity-range-handle velocity-range-handle-max"
+            style={{ left: `${maxPercent}%` }}
+            role="slider"
+            aria-label={`${label} maximum`}
+            aria-valuemin={minValue}
+            aria-valuemax={max}
+            aria-valuenow={maxValue}
+            aria-valuetext={`Max ${maxValue}`}
+            onKeyDown={(event) => handleHandleKeyDown("max", event)}
+          />
+        </div>
+
+        <div className="velocity-range-values" aria-hidden="true">
+          <span>Min {minValue}</span>
+          <span>{label}</span>
+          <span>Max {maxValue}</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function App() {
@@ -346,6 +824,7 @@ function App() {
     tomsVelocityMax < tomsVelocityMin ? "Toms velocity max must be greater than or equal to min." : "";
   const timeSignature = timeSignatureFromGrouping(grouping);
   const gridRows = pattern ? buildGridRows(pattern) : [];
+  const placeholderGridRows = buildPlaceholderGridRows();
 
   useEffect(() => {
     let isMounted = true;
@@ -885,28 +1364,6 @@ function App() {
               </div>
 
               <label className="field">
-                <span>Preset</span>
-                <select
-                  value={selectedPreset}
-                  onChange={(event) => handlePresetChange(event.target.value)}
-                  disabled={isLoadingPresets}
-                >
-                  <option value={CUSTOM_PRESET_ID}>Custom</option>
-                  {isLoadingPresets ? (
-                    <option>Loading presets...</option>
-                  ) : presets.length > 0 ? (
-                    presets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))
-                  ) : (
-                    <option>No presets available</option>
-                  )}
-                </select>
-              </label>
-
-              <label className="field">
                 <span>BPM</span>
                 <input
                   type="number"
@@ -1104,6 +1561,35 @@ function App() {
               </div>
             </section>
 
+            <section className="section-card">
+              <div className="section-card-head">
+                <h2>Preset</h2>
+                <p>Load a saved starting point without changing the generation or editing workflow.</p>
+              </div>
+
+              <label className="field">
+                <span>Preset</span>
+                <select
+                  value={selectedPreset}
+                  onChange={(event) => handlePresetChange(event.target.value)}
+                  disabled={isLoadingPresets}
+                >
+                  <option value={CUSTOM_PRESET_ID}>Custom</option>
+                  {isLoadingPresets ? (
+                    <option>Loading presets...</option>
+                  ) : presets.length > 0 ? (
+                    presets.map((preset) => (
+                      <option key={preset.id} value={preset.id}>
+                        {preset.label}
+                      </option>
+                    ))
+                  ) : (
+                    <option>No presets available</option>
+                  )}
+                </select>
+              </label>
+            </section>
+
             <section className="section-card section-card-status">
               <div className="section-card-head">
                 <h2>Playback & Actions</h2>
@@ -1272,14 +1758,10 @@ function App() {
               </div>
 
               <div className="band-grid band-grid-2">
-              <section className="instrument-card">
+              <section className="instrument-card instrument-card-kick">
                 <div className="instrument-head">
                   <h3>Kick</h3>
-                  <p>Dial in the backbone of the groove first.</p>
-                </div>
-
-                <div className="instrument-body">
-                  <label className="field-checkbox">
+                  <label className="field-checkbox field-checkbox-icon" aria-label="Kick enabled">
                     <input
                       type="checkbox"
                       checked={kickEnabled}
@@ -1290,90 +1772,61 @@ function App() {
                     />
                     <span>Enabled</span>
                   </label>
+                  <p>Dial in the backbone of the groove first.</p>
+                </div>
 
-                  <label className="field">
-                    <span>Density</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={kickDensity}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setKickDensity(Number(event.target.value));
-                      }}
-                    />
-                  </label>
+                <div className="instrument-body instrument-body-kick">
+                  <div className="kick-top-row">
+                    <div className="kick-top-cell kick-top-cell-density">
+                      <KnobControl
+                        label="Density"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={kickDensity}
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setKickDensity(nextValue);
+                        }}
+                      />
+                    </div>
 
-                  <label className="field">
-                    <span>Syncopation</span>
-                    <select
-                      value={kickSyncopation}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setKickSyncopation(Number(event.target.value));
-                      }}
-                    >
-                      {SYNCOPATION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="field">
-                    <span>Timing Feel</span>
-                    <select
-                      value={kickTimingFeel}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setKickTimingFeel(event.target.value as (typeof TIMING_FEEL_OPTIONS)[number]["value"]);
-                      }}
-                    >
-                      {TIMING_FEEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <div className="field">
-                    <span>Velocity</span>
-                    <div className="range-fields">
-                      <label className="field">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={kickVelocityMin}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setKickVelocityMin(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span>Max</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={kickVelocityMax}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setKickVelocityMax(Number(event.target.value));
-                          }}
-                        />
-                      </label>
+                    <div className="kick-top-cell kick-top-cell-timing">
+                      <TimingFeelControl
+                        value={kickTimingFeel}
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setKickTimingFeel(nextValue);
+                        }}
+                      />
                     </div>
                   </div>
+
+                  <div className="kick-syncopation-control">
+                    <SteppedSliderControl
+                      label="Syncopation"
+                      value={kickSyncopation}
+                      options={SYNCOPATION_OPTIONS}
+                      onChange={(nextValue) => {
+                        switchToCustomIfNeeded();
+                        setKickSyncopation(nextValue);
+                      }}
+                    />
+                  </div>
+
+                  <VelocityRangeControl
+                    label="Velocity"
+                    min={1}
+                    max={127}
+                    step={1}
+                    minValue={kickVelocityMin}
+                    maxValue={kickVelocityMax}
+                    onChange={(nextMin, nextMax) => {
+                      switchToCustomIfNeeded();
+                      setKickVelocityMin(nextMin);
+                      setKickVelocityMax(nextMax);
+                    }}
+                  />
                 </div>
               </section>
 
@@ -2180,7 +2633,7 @@ function App() {
                           <div
                             key={`${row.instrument}-${barIndex}`}
                             className="pattern-bar"
-                            style={{ gridTemplateColumns: `repeat(${pattern.meta.slots_per_bar}, minmax(14px, 1fr))` }}
+                            style={{ gridTemplateColumns: `repeat(${pattern.meta.slots_per_bar}, minmax(21px, 1fr))` }}
                           >
                             {bar.map((cell, slotIndex) => {
                               const numerator = numeratorFromGrouping(pattern.meta.grouping) ?? 4;
@@ -2257,8 +2710,38 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="pattern-empty">
-                <p>Generate a pattern to inspect the exact events coming back from the backend.</p>
+              <div className="pattern-grid-scroll pattern-grid-scroll-placeholder pattern-grid-scroll-locked">
+                <div className="pattern-grid">
+                  {placeholderGridRows.map((row) => (
+                    <div key={row.instrument} className="pattern-row pattern-row-placeholder">
+                      <div className="pattern-row-label">{row.label}</div>
+
+                      <div className="pattern-row-bars">
+                        {row.bars.map((bar, barIndex) => (
+                          <div
+                            key={`${row.instrument}-${barIndex}`}
+                            className="pattern-bar pattern-bar-placeholder"
+                            style={{ gridTemplateColumns: "repeat(32, minmax(21px, 1fr))" }}
+                          >
+                            {bar.map((_, slotIndex) => {
+                              const className = [
+                                "pattern-cell",
+                                "pattern-cell-placeholder",
+                                slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
+                                slotIndex % 2 === 0 ? "pattern-cell-even" : "",
+                                slotIndex % 8 === 0 ? "pattern-cell-quarter" : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" ");
+
+                              return <div key={`${row.instrument}-${barIndex}-${slotIndex}`} className={className} aria-hidden="true" />;
+                            })}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </section>
