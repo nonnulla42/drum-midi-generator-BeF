@@ -42,19 +42,25 @@ python -m venv .venv
 .venv\Scripts\activate
 ```
 
-2. Installa le dipendenze:
+2. Installa le dipendenze API:
 
 ```powershell
 pip install -r backend\requirements.txt
 ```
 
-3. Avvia la GUI desktop:
+3. Se vuoi usare la GUI desktop con playback locale, installa anche:
+
+```powershell
+pip install -r backend\requirements-desktop.txt
+```
+
+4. Avvia la GUI desktop:
 
 ```powershell
 python backend\main.py
 ```
 
-4. Avvia l'API FastAPI:
+5. Avvia l'API FastAPI:
 
 ```powershell
 uvicorn backend.api:app --reload
