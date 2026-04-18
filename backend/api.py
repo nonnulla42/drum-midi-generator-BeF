@@ -18,15 +18,28 @@ from core.pattern_serialization import deserialize_pattern, serialize_pattern
 from core.presets import load_preset, preset_names
 from core.timing import parse_grouping
 
+def parse_cors_origins() -> list[str]:
+    configured = os.getenv("BACKEND_CORS_ORIGINS", "")
+    origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+    if origins:
+        return origins
+
+    return [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "https://ghostgroove.com",
+        "https://www.ghostgroove.com",
+    ]
+
+
 app = FastAPI()
 generator = DrumPatternGenerator()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+    allow_origins=parse_cors_origins(),
+    allow_origin_regex=r"https://.*\.pages\.dev",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -45,13 +45,19 @@ python -m venv .venv
 2. Installa le dipendenze:
 
 ```powershell
-pip install -r requirements.txt
+pip install -r backend\requirements.txt
 ```
 
-3. Avvia l'app:
+3. Avvia la GUI desktop:
 
 ```powershell
-python main.py
+python backend\main.py
+```
+
+4. Avvia l'API FastAPI:
+
+```powershell
+uvicorn backend.api:app --reload
 ```
 
 ## Workflow Consigliato
@@ -269,6 +275,27 @@ Regole importanti:
 - l'aggiunta manuale diretta vale solo per i `base hits`, non per le `ghost`
 
 Questa modalita e il modo piu rapido per trasformare il tool da generatore a correttore manuale del groove.
+
+## Deploy Beta
+
+### Frontend su Cloudflare Pages
+
+- `Root directory`: `frontend`
+- `Build command`: `npm run build`
+- `Build output directory`: `dist`
+- variabile ambiente: `VITE_API_BASE_URL=https://api.ghostgroove.com`
+
+Per la beta iniziale puoi usare anche l'URL Render temporaneo, ad esempio `https://ghostgroove-api.onrender.com`.
+
+### Backend su Render
+
+- il repository include gia `render.yaml`
+- `Root Directory`: `backend`
+- `Build Command`: `pip install -r requirements.txt`
+- `Start Command`: `uvicorn api:app --host 0.0.0.0 --port $PORT`
+- env var consigliata: `BACKEND_CORS_ORIGINS=https://ghostgroove.com,https://www.ghostgroove.com`
+
+Se vuoi testare prima del dominio finale, aggiungi anche il dominio Pages temporaneo a `BACKEND_CORS_ORIGINS`.
 
 ### Playback & Actions
 
