@@ -382,15 +382,15 @@ function KnobControl({ label, value, min, max, step, onChange }: KnobControlProp
 }
 
 type SteppedSliderOption = {
-  value: number;
+  value: number | string;
   label: string;
 };
 
 type SteppedSliderControlProps = {
   label: string;
-  value: number;
+  value: number | string;
   options: SteppedSliderOption[];
-  onChange: (value: number) => void;
+  onChange: (value: number | string) => void;
 };
 
 function SteppedSliderControl({ label, value, options, onChange }: SteppedSliderControlProps) {
@@ -400,7 +400,7 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
   const activeOption = options[activeIndex] ?? options[0];
   const handlePercent = options.length > 1 ? (activeIndex / (options.length - 1)) * 100 : 0;
 
-  function valueFromClientX(clientX: number): number {
+  function valueFromClientX(clientX: number): number | string {
     const track = trackRef.current;
     if (!track) {
       return activeOption.value;
@@ -467,8 +467,16 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
       <div className="plugin-control-head">
         <span>{label}</span>
         <output className="plugin-control-readout">
-          <span className="plugin-control-readout-index">{String(activeOption.value)}</span>
-          <span className="plugin-control-readout-label">{activeOption.label.replace(/^\d+\s*/, "").toLowerCase()}</span>
+          {typeof activeOption.value === "number" ? (
+            <>
+              <span className="plugin-control-readout-index">{String(activeOption.value)}</span>
+              <span className="plugin-control-readout-label">{activeOption.label.replace(/^\d+\s*/, "").toLowerCase()}</span>
+            </>
+          ) : (
+            <span className="plugin-control-readout-label plugin-control-readout-label-standalone">
+              {activeOption.label.toLowerCase()}
+            </span>
+          )}
         </output>
       </div>
 
@@ -478,9 +486,9 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
         role="slider"
         tabIndex={0}
         aria-label={label}
-        aria-valuemin={options[0]?.value ?? 0}
-        aria-valuemax={options[options.length - 1]?.value ?? 0}
-        aria-valuenow={activeOption.value}
+        aria-valuemin={0}
+        aria-valuemax={Math.max(options.length - 1, 0)}
+        aria-valuenow={activeIndex}
         aria-valuetext={activeOption.label}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
@@ -495,7 +503,7 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
           <div className="stepped-slider-fill" style={{ width: `${handlePercent}%` }} />
           {options.map((option, index) => {
             const tickPercent = options.length > 1 ? (index / (options.length - 1)) * 100 : 0;
-            const isActive = option.value <= activeOption.value;
+            const isActive = index <= activeIndex;
 
             return (
               <button
@@ -514,6 +522,274 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
             );
           })}
           <div className="stepped-slider-handle" style={{ left: `${handlePercent}%` }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type HandleOptionSliderControlProps = {
+  label: string;
+  value: string;
+  options: readonly { value: string; label: string }[];
+  onChange: (value: string) => void;
+  orientation?: "horizontal" | "vertical";
+};
+
+function HandleOptionSliderControl({
+  label,
+  value,
+  options,
+  onChange,
+  orientation = "horizontal",
+}: HandleOptionSliderControlProps) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerIdRef = useRef<number | null>(null);
+  const activeIndex = Math.max(0, options.findIndex((option) => option.value === value));
+  const activeOption = options[activeIndex] ?? options[0];
+  const handlePercent = options.length > 1 ? (activeIndex / (options.length - 1)) * 100 : 0;
+
+  function valueFromClientX(clientX: number): string {
+    const track = trackRef.current;
+    if (!track) {
+      return activeOption.value;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const ratio = clampValue((clientX - rect.left) / rect.width, 0, 1);
+    const index = Math.round(ratio * (options.length - 1));
+    return options[index]?.value ?? activeOption.value;
+  }
+
+  function valueFromClientY(clientY: number): string {
+    const track = trackRef.current;
+    if (!track) {
+      return activeOption.value;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const ratio = clampValue((rect.bottom - clientY) / rect.height, 0, 1);
+    const index = Math.round(ratio * (options.length - 1));
+    return options[index]?.value ?? activeOption.value;
+  }
+
+  function commitFromPointer(clientX: number, clientY: number) {
+    onChange(orientation === "vertical" ? valueFromClientY(clientY) : valueFromClientX(clientX));
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    dragPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    commitFromPointer(event.clientX, event.clientY);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    commitFromPointer(event.clientX, event.clientY);
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current === event.pointerId) {
+      dragPointerIdRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      onChange(options[Math.min(activeIndex + 1, options.length - 1)]?.value ?? activeOption.value);
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      onChange(options[Math.max(activeIndex - 1, 0)]?.value ?? activeOption.value);
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      onChange(options[0]?.value ?? activeOption.value);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      onChange(options[options.length - 1]?.value ?? activeOption.value);
+    }
+  }
+
+  return (
+    <div className="field">
+      <div className="plugin-control-head">
+        <span>{label}</span>
+      </div>
+
+      <div
+        ref={trackRef}
+        className={orientation === "vertical" ? "handle-option-slider handle-option-slider-vertical" : "handle-option-slider"}
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={0}
+        aria-valuemax={Math.max(options.length - 1, 0)}
+        aria-valuenow={activeIndex}
+        aria-valuetext={activeOption.label}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={() => {
+          dragPointerIdRef.current = null;
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        <div className="handle-option-slider-track">
+          <div
+            className="handle-option-slider-fill"
+            style={orientation === "vertical" ? { height: `${handlePercent}%` } : { width: `${handlePercent}%` }}
+          />
+          {options.map((option, index) => {
+            const tickPercent = options.length > 1 ? (index / (options.length - 1)) * 100 : 0;
+
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={option.value === activeOption.value ? "handle-option-slider-tick handle-option-slider-tick-active" : "handle-option-slider-tick"}
+                style={orientation === "vertical" ? { bottom: `${tickPercent}%` } : { left: `${tickPercent}%` }}
+                aria-label={option.label}
+                aria-pressed={option.value === activeOption.value}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onChange(option.value);
+                }}
+              />
+            );
+          })}
+          <div
+            className={orientation === "vertical" ? "handle-option-slider-handle handle-option-slider-handle-vertical" : "handle-option-slider-handle"}
+            style={orientation === "vertical" ? { bottom: `${handlePercent}%` } : { left: `${handlePercent}%` }}
+          >
+            <span>{activeOption.label}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ContinuousSliderControlProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+};
+
+function ContinuousSliderControl({ label, value, min, max, step, onChange }: ContinuousSliderControlProps) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerIdRef = useRef<number | null>(null);
+  const percent = max > min ? ((value - min) / (max - min)) * 100 : 0;
+
+  function valueFromClientX(clientX: number): number {
+    const track = trackRef.current;
+    if (!track) {
+      return value;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const ratio = clampValue((clientX - rect.left) / rect.width, 0, 1);
+    const rawValue = min + ratio * (max - min);
+    return snapToStep(clampValue(rawValue, min, max), min, step);
+  }
+
+  function commitFromClientX(clientX: number) {
+    onChange(valueFromClientX(clientX));
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    dragPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    commitFromClientX(event.clientX);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    commitFromClientX(event.clientX);
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current === event.pointerId) {
+      dragPointerIdRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+      event.preventDefault();
+      onChange(snapToStep(clampValue(value + step, min, max), min, step));
+      return;
+    }
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
+      event.preventDefault();
+      onChange(snapToStep(clampValue(value - step, min, max), min, step));
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      onChange(min);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      onChange(max);
+    }
+  }
+
+  return (
+    <div className="field">
+      <div className="plugin-control-head">
+        <span>{label}</span>
+        <output className="plugin-control-readout">
+          <span className="plugin-control-readout-index">{formatKnobValue(value)}</span>
+        </output>
+      </div>
+
+      <div
+        ref={trackRef}
+        className="continuous-slider"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-valuetext={formatKnobValue(value)}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={() => {
+          dragPointerIdRef.current = null;
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        <div className="continuous-slider-track">
+          <div className="continuous-slider-fill" style={{ width: `${percent}%` }} />
+          <div className="continuous-slider-handle" style={{ left: `${percent}%` }} />
         </div>
       </div>
     </div>
@@ -1968,7 +2244,7 @@ function App() {
                       options={SYNCOPATION_OPTIONS}
                       onChange={(nextValue) => {
                         switchToCustomIfNeeded();
-                        setKickSyncopation(nextValue);
+                        setKickSyncopation(nextValue as number);
                       }}
                     />
                   </div>
@@ -2041,7 +2317,7 @@ function App() {
                       options={SYNCOPATION_OPTIONS}
                       onChange={(nextValue) => {
                         switchToCustomIfNeeded();
-                        setSnareSyncopation(nextValue);
+                        setSnareSyncopation(nextValue as number);
                       }}
                     />
                   </div>
@@ -2129,14 +2405,10 @@ function App() {
               </div>
 
               <div className="band-grid band-grid-2">
-              <section className="instrument-card">
+              <section className="instrument-card instrument-card-hihat-closed">
                 <div className="instrument-head">
                   <h3>Hi-Hat Closed</h3>
-                  <p>Shape the pulse layer with spacing, subdivision, and feel.</p>
-                </div>
-
-                <div className="instrument-body">
-                  <label className="field-checkbox">
+                  <label className="field-checkbox field-checkbox-icon" aria-label="Hi-Hat Closed enabled">
                     <input
                       type="checkbox"
                       checked={hihatClosedEnabled}
@@ -2147,173 +2419,135 @@ function App() {
                     />
                     <span>Enabled</span>
                   </label>
+                  <p>Shape the pulse layer with spacing, subdivision, and feel.</p>
+                </div>
 
-                  <label className="field">
-                    <span>Division</span>
-                    <select
-                      value={hihatClosedDivision}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setHihatClosedDivision(event.target.value as (typeof DIVISION_OPTIONS)[number]["value"]);
-                      }}
-                    >
-                      {DIVISION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="instrument-body instrument-body-hihat-closed">
+                  <div className="hihat-closed-top-row">
+                    <div className="hihat-closed-top-cell hihat-closed-top-cell-division">
+                      <HandleOptionSliderControl
+                        label="Division"
+                        value={hihatClosedDivision}
+                        options={DIVISION_OPTIONS}
+                        orientation="vertical"
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setHihatClosedDivision(nextValue as (typeof DIVISION_OPTIONS)[number]["value"]);
+                        }}
+                      />
+                    </div>
 
-                  <label className="field">
-                    <span>Space</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={hihatClosedSpace}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setHihatClosedSpace(Number(event.target.value));
-                      }}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Timing Feel</span>
-                    <select
-                      value={hihatClosedTimingFeel}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setHihatClosedTimingFeel(event.target.value as (typeof TIMING_FEEL_OPTIONS)[number]["value"]);
-                      }}
-                    >
-                      {TIMING_FEEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <div className="field">
-                    <span>Velocity</span>
-                    <div className="range-fields">
-                      <label className="field">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={hihatClosedVelocityMin}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setHihatClosedVelocityMin(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span>Max</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={hihatClosedVelocityMax}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setHihatClosedVelocityMax(Number(event.target.value));
-                          }}
-                        />
-                      </label>
+                    <div className="hihat-closed-top-cell hihat-closed-top-cell-timing">
+                      <TimingFeelControl
+                        value={hihatClosedTimingFeel}
+                        ariaLabel="Hi-Hat Closed timing feel"
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setHihatClosedTimingFeel(nextValue);
+                        }}
+                      />
                     </div>
                   </div>
 
-                  <div className="ghost-card">
-                    <div className="ghost-card-head">
-                      <h4>Ghost Layer</h4>
-                      <p>Subtle pulse notes around the main closed-hat anchors.</p>
+                  <div className="pulse-top-label-row">
+                    <span>Division</span>
+                    <span>Timing Feel</span>
+                  </div>
+
+                  <div className="hihat-closed-space-control">
+                    <ContinuousSliderControl
+                      label="Space"
+                      value={hihatClosedSpace}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      onChange={(nextValue) => {
+                        switchToCustomIfNeeded();
+                        setHihatClosedSpace(nextValue);
+                      }}
+                    />
+                  </div>
+
+                  <div className="hihat-closed-velocity-control">
+                    <VelocityRangeControl
+                      label="Velocity"
+                      minValue={hihatClosedVelocityMin}
+                      maxValue={hihatClosedVelocityMax}
+                      min={1}
+                      max={127}
+                      step={1}
+                      onChange={(nextMin, nextMax) => {
+                        switchToCustomIfNeeded();
+                        setHihatClosedVelocityMin(nextMin);
+                        setHihatClosedVelocityMax(nextMax);
+                      }}
+                    />
+                  </div>
+
+                  <div className="hihat-closed-ghost-section">
+                    <div className="hihat-closed-ghost-head">
+                      <h4>ghost layer</h4>
+                      <label className="field-checkbox field-checkbox-icon" aria-label="Hi-Hat Closed ghost enabled">
+                        <input
+                          type="checkbox"
+                          checked={hihatClosedGhostEnabled}
+                          onChange={(event) => {
+                            switchToCustomIfNeeded();
+                            setHihatClosedGhostEnabled(event.target.checked);
+                          }}
+                        />
+                        <span>Enabled</span>
+                      </label>
                     </div>
 
-                    <label className="field-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={hihatClosedGhostEnabled}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setHihatClosedGhostEnabled(event.target.checked);
-                        }}
-                      />
-                      <span>Enabled</span>
-                    </label>
+                    <div className="hihat-closed-ghost-top-row">
+                      <div className="hihat-closed-ghost-density">
+                        <KnobControl
+                          label="density"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={hihatClosedGhostDensity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setHihatClosedGhostDensity(nextValue);
+                          }}
+                        />
+                      </div>
 
-                    <label className="field">
-                      <span>Density</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={hihatClosedGhostDensity}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setHihatClosedGhostDensity(Number(event.target.value));
-                        }}
-                      />
-                    </label>
+                      <div className="hihat-closed-ghost-velocity">
+                        <VerticalSliderControl
+                          label="velocity"
+                          min={1}
+                          max={127}
+                          step={1}
+                          value={hihatClosedGhostVelocity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setHihatClosedGhostVelocity(nextValue);
+                          }}
+                        />
+                      </div>
 
-                    <label className="field">
-                      <span>Velocity</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={127}
-                        step={1}
-                        value={hihatClosedGhostVelocity}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setHihatClosedGhostVelocity(Number(event.target.value));
-                        }}
-                      />
-                    </label>
-
-                    <div className="field">
-                      <span>Placement</span>
-                      <div className="segmented-control" role="group" aria-label="Hi-Hat Closed ghost placement">
-                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={
-                              option.value === hihatClosedGhostPlacement
-                                ? "segment-button segment-button-active"
-                                : "segment-button"
-                            }
-                            onClick={() => {
-                              switchToCustomIfNeeded();
-                              setHihatClosedGhostPlacement(option.value);
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
+                      <div className="hihat-closed-ghost-placement">
+                        <GhostPlacementControl
+                          value={hihatClosedGhostPlacement}
+                          ariaLabel="Hi-Hat Closed ghost placement"
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setHihatClosedGhostPlacement(nextValue);
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
                 </div>
               </section>
 
-              <section className="instrument-card">
+              <section className="instrument-card instrument-card-ride">
                 <div className="instrument-head">
                   <h3>Ride</h3>
-                  <p>Use it as an alternate pulse layer with its own spacing and feel.</p>
-                </div>
-
-                <div className="instrument-body">
-                  <label className="field-checkbox">
+                  <label className="field-checkbox field-checkbox-icon" aria-label="Ride enabled">
                     <input
                       type="checkbox"
                       checked={rideEnabled}
@@ -2324,155 +2558,125 @@ function App() {
                     />
                     <span>Enabled</span>
                   </label>
+                  <p>Use it as an alternate pulse layer with its own spacing and feel.</p>
+                </div>
 
-                  <label className="field">
-                    <span>Division</span>
-                    <select
-                      value={rideDivision}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setRideDivision(event.target.value as (typeof DIVISION_OPTIONS)[number]["value"]);
-                      }}
-                    >
-                      {DIVISION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div className="instrument-body instrument-body-ride">
+                  <div className="ride-top-row">
+                    <div className="ride-top-cell ride-top-cell-division">
+                      <HandleOptionSliderControl
+                        label="Division"
+                        value={rideDivision}
+                        options={DIVISION_OPTIONS}
+                        orientation="vertical"
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setRideDivision(nextValue as (typeof DIVISION_OPTIONS)[number]["value"]);
+                        }}
+                      />
+                    </div>
 
-                  <label className="field">
-                    <span>Space</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={rideSpace}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setRideSpace(Number(event.target.value));
-                      }}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Timing Feel</span>
-                    <select
-                      value={rideTimingFeel}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setRideTimingFeel(event.target.value as (typeof TIMING_FEEL_OPTIONS)[number]["value"]);
-                      }}
-                    >
-                      {TIMING_FEEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <div className="field">
-                    <span>Velocity</span>
-                    <div className="range-fields">
-                      <label className="field">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={rideVelocityMin}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setRideVelocityMin(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span>Max</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={rideVelocityMax}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setRideVelocityMax(Number(event.target.value));
-                          }}
-                        />
-                      </label>
+                    <div className="ride-top-cell ride-top-cell-timing">
+                      <TimingFeelControl
+                        value={rideTimingFeel}
+                        ariaLabel="Ride timing feel"
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setRideTimingFeel(nextValue);
+                        }}
+                      />
                     </div>
                   </div>
 
-                  <div className="ghost-card">
-                    <div className="ghost-card-head">
-                      <h4>Ghost Layer</h4>
-                      <p>Low-velocity ride taps, matching the Python desktop controls.</p>
+                  <div className="pulse-top-label-row">
+                    <span>Division</span>
+                    <span>Timing Feel</span>
+                  </div>
+
+                  <div className="ride-space-control">
+                    <ContinuousSliderControl
+                      label="Space"
+                      value={rideSpace}
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      onChange={(nextValue) => {
+                        switchToCustomIfNeeded();
+                        setRideSpace(nextValue);
+                      }}
+                    />
+                  </div>
+
+                  <div className="ride-velocity-control">
+                    <VelocityRangeControl
+                      label="Velocity"
+                      minValue={rideVelocityMin}
+                      maxValue={rideVelocityMax}
+                      min={1}
+                      max={127}
+                      step={1}
+                      onChange={(nextMin, nextMax) => {
+                        switchToCustomIfNeeded();
+                        setRideVelocityMin(nextMin);
+                        setRideVelocityMax(nextMax);
+                      }}
+                    />
+                  </div>
+
+                  <div className="ride-ghost-section">
+                    <div className="ride-ghost-head">
+                      <h4>ghost layer</h4>
+                      <label className="field-checkbox field-checkbox-icon" aria-label="Ride ghost enabled">
+                        <input
+                          type="checkbox"
+                          checked={rideGhostEnabled}
+                          onChange={(event) => {
+                            switchToCustomIfNeeded();
+                            setRideGhostEnabled(event.target.checked);
+                          }}
+                        />
+                        <span>Enabled</span>
+                      </label>
                     </div>
 
-                    <label className="field-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={rideGhostEnabled}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setRideGhostEnabled(event.target.checked);
-                        }}
-                      />
-                      <span>Enabled</span>
-                    </label>
+                    <div className="ride-ghost-top-row">
+                      <div className="ride-ghost-density">
+                        <KnobControl
+                          label="density"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={rideGhostDensity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setRideGhostDensity(nextValue);
+                          }}
+                        />
+                      </div>
 
-                    <label className="field">
-                      <span>Density</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={rideGhostDensity}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setRideGhostDensity(Number(event.target.value));
-                        }}
-                      />
-                    </label>
+                      <div className="ride-ghost-velocity">
+                        <VerticalSliderControl
+                          label="velocity"
+                          min={1}
+                          max={127}
+                          step={1}
+                          value={rideGhostVelocity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setRideGhostVelocity(nextValue);
+                          }}
+                        />
+                      </div>
 
-                    <label className="field">
-                      <span>Velocity</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={127}
-                        step={1}
-                        value={rideGhostVelocity}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setRideGhostVelocity(Number(event.target.value));
-                        }}
-                      />
-                    </label>
-
-                    <div className="field">
-                      <span>Placement</span>
-                      <div className="segmented-control" role="group" aria-label="Ride ghost placement">
-                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={option.value === rideGhostPlacement ? "segment-button segment-button-active" : "segment-button"}
-                            onClick={() => {
-                              switchToCustomIfNeeded();
-                              setRideGhostPlacement(option.value);
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
+                      <div className="ride-ghost-placement">
+                        <GhostPlacementControl
+                          value={rideGhostPlacement}
+                          ariaLabel="Ride ghost placement"
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setRideGhostPlacement(nextValue);
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
