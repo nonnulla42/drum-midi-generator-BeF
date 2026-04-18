@@ -262,7 +262,7 @@ function snapToStep(value: number, min: number, step: number): number {
 }
 
 function formatKnobValue(value: number): string {
-  return value.toFixed(2).replace(/\.?0+$/, "");
+  return value.toFixed(2);
 }
 
 type KnobControlProps = {
@@ -466,7 +466,10 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
     <div className="field">
       <div className="plugin-control-head">
         <span>{label}</span>
-        <output className="plugin-control-readout">{activeOption.label}</output>
+        <output className="plugin-control-readout">
+          <span className="plugin-control-readout-index">{String(activeOption.value)}</span>
+          <span className="plugin-control-readout-label">{activeOption.label.replace(/^\d+\s*/, "").toLowerCase()}</span>
+        </output>
       </div>
 
       <div
@@ -520,6 +523,7 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
 type TimingFeelControlProps = {
   value: (typeof TIMING_FEEL_OPTIONS)[number]["value"];
   onChange: (value: (typeof TIMING_FEEL_OPTIONS)[number]["value"]) => void;
+  ariaLabel?: string;
 };
 
 const TIMING_FEEL_VISUAL_OPTIONS = [
@@ -529,14 +533,14 @@ const TIMING_FEEL_VISUAL_OPTIONS = [
   { value: "random", label: "Random", shape: "center random" },
 ] as const;
 
-function TimingFeelControl({ value, onChange }: TimingFeelControlProps) {
+function TimingFeelControl({ value, onChange, ariaLabel = "Timing feel" }: TimingFeelControlProps) {
   return (
     <div className="field">
       <div className="plugin-control-head">
         <span>Timing Feel</span>
       </div>
 
-      <div className="timing-feel-control" role="group" aria-label="Kick timing feel">
+      <div className="timing-feel-control" role="group" aria-label={ariaLabel}>
         {TIMING_FEEL_VISUAL_OPTIONS.map((option) => {
           const isActive = option.value === value;
 
@@ -700,6 +704,161 @@ function VelocityRangeControl({ label, minValue, maxValue, min, max, step, onCha
           <span>{label}</span>
           <span>Max {maxValue}</span>
         </div>
+      </div>
+    </div>
+  );
+}
+
+type VerticalSliderControlProps = {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+};
+
+function VerticalSliderControl({ label, value, min, max, step, onChange }: VerticalSliderControlProps) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const dragPointerIdRef = useRef<number | null>(null);
+  const range = max - min;
+  const handlePercent = range > 0 ? ((value - min) / range) * 100 : 0;
+
+  function valueFromClientY(clientY: number): number {
+    const track = trackRef.current;
+    if (!track) {
+      return value;
+    }
+
+    const rect = track.getBoundingClientRect();
+    const ratio = clampValue((rect.bottom - clientY) / rect.height, 0, 1);
+    const rawValue = min + ratio * range;
+    return snapToStep(clampValue(rawValue, min, max), min, step);
+  }
+
+  function commitFromClientY(clientY: number) {
+    onChange(valueFromClientY(clientY));
+  }
+
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    dragPointerIdRef.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    commitFromClientY(event.clientY);
+  }
+
+  function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current !== event.pointerId) {
+      return;
+    }
+
+    commitFromClientY(event.clientY);
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+    if (dragPointerIdRef.current === event.pointerId) {
+      dragPointerIdRef.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key === "ArrowUp" || event.key === "ArrowRight") {
+      event.preventDefault();
+      onChange(snapToStep(clampValue(value + step, min, max), min, step));
+      return;
+    }
+
+    if (event.key === "ArrowDown" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      onChange(snapToStep(clampValue(value - step, min, max), min, step));
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      onChange(min);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      onChange(max);
+    }
+  }
+
+  return (
+    <div className="vertical-slider-control">
+      <div
+        ref={trackRef}
+        className="vertical-slider"
+        role="slider"
+        tabIndex={0}
+        aria-label={label}
+        aria-valuemin={min}
+        aria-valuemax={max}
+        aria-valuenow={value}
+        aria-valuetext={`${label} ${value}`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onLostPointerCapture={() => {
+          dragPointerIdRef.current = null;
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        <div className="vertical-slider-track">
+          <div className="vertical-slider-fill" style={{ height: `${handlePercent}%` }} />
+          <div className="vertical-slider-handle" style={{ bottom: `${handlePercent}%` }} />
+        </div>
+      </div>
+
+      <div className="vertical-slider-meta">
+        <span className="vertical-slider-value">{value}</span>
+        <span className="vertical-slider-label">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+type GhostPlacementControlProps = {
+  value: (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"];
+  onChange: (value: (typeof GHOST_PLACEMENT_OPTIONS)[number]["value"]) => void;
+  ariaLabel?: string;
+};
+
+const GHOST_PLACEMENT_VISUAL_OPTIONS = [
+  { value: "before", label: "Before", shape: "left" },
+  { value: "both", label: "Both", shape: "center" },
+  { value: "after", label: "After", shape: "right" },
+] as const;
+
+function GhostPlacementControl({ value, onChange, ariaLabel = "Ghost placement" }: GhostPlacementControlProps) {
+  return (
+    <div className="field">
+      <div className="ghost-placement-control" role="group" aria-label={ariaLabel}>
+        {GHOST_PLACEMENT_VISUAL_OPTIONS.map((option) => {
+          const isActive = option.value === value;
+
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={
+                isActive
+                  ? `timing-feel-button timing-feel-button-${option.shape} timing-feel-button-active`
+                  : `timing-feel-button timing-feel-button-${option.shape}`
+              }
+              aria-pressed={isActive}
+              onClick={() => onChange(option.value)}
+            >
+              <span className="timing-feel-button-label">{option.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="plugin-control-head ghost-placement-head">
+        <span>Placement</span>
       </div>
     </div>
   );
@@ -1830,14 +1989,10 @@ function App() {
                 </div>
               </section>
 
-              <section className="instrument-card">
+              <section className="instrument-card instrument-card-snare">
                 <div className="instrument-head">
                   <h3>Snare</h3>
-                  <p>Set the backbeat weight and how much it pushes or relaxes the groove.</p>
-                </div>
-
-                <div className="instrument-body">
-                  <label className="field-checkbox">
+                  <label className="field-checkbox field-checkbox-icon" aria-label="Snare enabled">
                     <input
                       type="checkbox"
                       checked={snareEnabled}
@@ -1848,159 +2003,117 @@ function App() {
                     />
                     <span>Enabled</span>
                   </label>
+                  <p>Set the backbeat weight and how much it pushes or relaxes the groove.</p>
+                </div>
 
-                  <label className="field">
-                    <span>Density</span>
-                    <input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={snareDensity}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setSnareDensity(Number(event.target.value));
-                      }}
-                    />
-                  </label>
-
-                  <label className="field">
-                    <span>Syncopation</span>
-                    <select
-                      value={snareSyncopation}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setSnareSyncopation(Number(event.target.value));
-                      }}
-                    >
-                      {SYNCOPATION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="field">
-                    <span>Timing Feel</span>
-                    <select
-                      value={snareTimingFeel}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setSnareTimingFeel(event.target.value as (typeof TIMING_FEEL_OPTIONS)[number]["value"]);
-                      }}
-                    >
-                      {TIMING_FEEL_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <div className="field">
-                    <span>Velocity</span>
-                    <div className="range-fields">
-                      <label className="field">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={snareVelocityMin}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setSnareVelocityMin(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span>Max</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={snareVelocityMax}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setSnareVelocityMax(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  <div className="ghost-card">
-                    <div className="ghost-card-head">
-                      <h4>Ghost Layer</h4>
-                      <p>Secondary snare notes, aligned with the desktop behavior.</p>
-                    </div>
-
-                    <label className="field-checkbox">
-                      <input
-                        type="checkbox"
-                        checked={snareGhostEnabled}
-                        onChange={(event) => {
-                          switchToCustomIfNeeded();
-                          setSnareGhostEnabled(event.target.checked);
-                        }}
-                      />
-                      <span>Enabled</span>
-                    </label>
-
-                    <label className="field">
-                      <span>Density</span>
-                      <input
-                        type="number"
+                <div className="instrument-body instrument-body-snare">
+                  <div className="snare-top-row">
+                    <div className="snare-top-cell snare-top-cell-density">
+                      <KnobControl
+                        label="Density"
                         min={0}
                         max={1}
                         step={0.01}
-                        value={snareGhostDensity}
-                        onChange={(event) => {
+                        value={snareDensity}
+                        onChange={(nextValue) => {
                           switchToCustomIfNeeded();
-                          setSnareGhostDensity(Number(event.target.value));
+                          setSnareDensity(nextValue);
                         }}
                       />
-                    </label>
+                    </div>
 
-                    <label className="field">
-                      <span>Velocity</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={127}
-                        step={1}
-                        value={snareGhostVelocity}
-                        onChange={(event) => {
+                    <div className="snare-top-cell snare-top-cell-timing">
+                      <TimingFeelControl
+                        value={snareTimingFeel}
+                        ariaLabel="Snare timing feel"
+                        onChange={(nextValue) => {
                           switchToCustomIfNeeded();
-                          setSnareGhostVelocity(Number(event.target.value));
+                          setSnareTimingFeel(nextValue);
                         }}
                       />
-                    </label>
+                    </div>
+                  </div>
 
-                    <div className="field">
-                      <span>Placement</span>
-                      <div className="segmented-control" role="group" aria-label="Snare ghost placement">
-                        {GHOST_PLACEMENT_OPTIONS.map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={
-                              option.value === snareGhostPlacement
-                                ? "segment-button segment-button-active"
-                                : "segment-button"
-                            }
-                            onClick={() => {
-                              switchToCustomIfNeeded();
-                              setSnareGhostPlacement(option.value);
-                            }}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
+                  <div className="snare-syncopation-control">
+                    <SteppedSliderControl
+                      label="Syncopation"
+                      value={snareSyncopation}
+                      options={SYNCOPATION_OPTIONS}
+                      onChange={(nextValue) => {
+                        switchToCustomIfNeeded();
+                        setSnareSyncopation(nextValue);
+                      }}
+                    />
+                  </div>
+
+                  <VelocityRangeControl
+                    label="Velocity"
+                    min={1}
+                    max={127}
+                    step={1}
+                    minValue={snareVelocityMin}
+                    maxValue={snareVelocityMax}
+                    onChange={(nextMin, nextMax) => {
+                      switchToCustomIfNeeded();
+                      setSnareVelocityMin(nextMin);
+                      setSnareVelocityMax(nextMax);
+                    }}
+                  />
+
+                  <div className="snare-ghost-section">
+                    <div className="snare-ghost-head">
+                      <h4>Ghost Layer</h4>
+                      <label className="field-checkbox field-checkbox-icon" aria-label="Snare ghost enabled">
+                        <input
+                          type="checkbox"
+                          checked={snareGhostEnabled}
+                          onChange={(event) => {
+                            switchToCustomIfNeeded();
+                            setSnareGhostEnabled(event.target.checked);
+                          }}
+                        />
+                        <span>Enabled</span>
+                      </label>
+                    </div>
+
+                    <div className="snare-ghost-top-row">
+                      <div className="snare-ghost-density">
+                        <KnobControl
+                          label="Density"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={snareGhostDensity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setSnareGhostDensity(nextValue);
+                          }}
+                        />
+                      </div>
+
+                      <div className="snare-ghost-velocity">
+                        <VerticalSliderControl
+                          label="Velocity"
+                          min={1}
+                          max={127}
+                          step={1}
+                          value={snareGhostVelocity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setSnareGhostVelocity(nextValue);
+                          }}
+                        />
+                      </div>
+
+                      <div className="snare-ghost-placement">
+                        <GhostPlacementControl
+                          value={snareGhostPlacement}
+                          ariaLabel="Snare ghost placement"
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setSnareGhostPlacement(nextValue);
+                          }}
+                        />
                       </div>
                     </div>
                   </div>
