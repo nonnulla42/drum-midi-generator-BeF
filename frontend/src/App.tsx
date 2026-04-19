@@ -2471,6 +2471,13 @@ function App() {
                       <TimingFeelControl
                         value={hihatClosedTimingFeel}
                         ariaLabel="Hi-Hat Closed timing feel"
+                        className="timing-feel-control-vertical"
+                        options={[
+                          { value: "push", label: "Push", shape: "center" },
+                          { value: "neutral", label: "Neutral", shape: "center" },
+                          { value: "drag", label: "Drag", shape: "center" },
+                          { value: "random", label: "Random", shape: "center random" },
+                        ]}
                         onChange={(nextValue) => {
                           switchToCustomIfNeeded();
                           setHihatClosedTimingFeel(nextValue);
@@ -2610,6 +2617,13 @@ function App() {
                       <TimingFeelControl
                         value={rideTimingFeel}
                         ariaLabel="Ride timing feel"
+                        className="timing-feel-control-vertical"
+                        options={[
+                          { value: "push", label: "Push", shape: "center" },
+                          { value: "neutral", label: "Neutral", shape: "center" },
+                          { value: "drag", label: "Drag", shape: "center" },
+                          { value: "random", label: "Random", shape: "center random" },
+                        ]}
                         onChange={(nextValue) => {
                           switchToCustomIfNeeded();
                           setRideTimingFeel(nextValue);
