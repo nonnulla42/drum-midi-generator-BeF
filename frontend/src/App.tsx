@@ -116,6 +116,13 @@ const DIVISION_OPTIONS = [
   { value: "sixteenth", label: "Sixteenth" },
 ] as const;
 
+const TOMS_HIT_OPTIONS = [
+  { value: "0", label: "0" },
+  { value: "1", label: "1" },
+  { value: "2", label: "2" },
+  { value: "3", label: "3" },
+] as const;
+
 const GHOST_PLACEMENT_OPTIONS = [
   { value: "before", label: "Before" },
   { value: "after", label: "After" },
@@ -1948,68 +1955,6 @@ function App() {
 
             <section className="section-card">
               <div className="section-card-head">
-                <h2>Fill</h2>
-                <p>Control how often fills appear and how far they stretch the phrase.</p>
-              </div>
-
-              <div className="inline-fields">
-                <label className="field">
-                  <span>Intensity</span>
-                  <select
-                    value={fillIntensity}
-                    onChange={(event) => {
-                      switchToCustomIfNeeded();
-                      setFillIntensity(event.target.value as "off" | "low" | "medium" | "high");
-                    }}
-                  >
-                    {["off", "low", "medium", "high"].map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className={`field ${fillIntensity === "off" ? "field-muted" : ""}`}>
-                  <span>Length</span>
-                  <select
-                    value={fillLength}
-                    onChange={(event) => {
-                      switchToCustomIfNeeded();
-                      setFillLength(event.target.value as "short" | "medium" | "long");
-                    }}
-                    disabled={fillIntensity === "off"}
-                  >
-                    {["short", "medium", "long"].map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className={`field ${fillIntensity === "off" ? "field-muted" : ""}`}>
-                  <span>Every</span>
-                  <select
-                    value={fillEvery}
-                    onChange={(event) => {
-                      switchToCustomIfNeeded();
-                      setFillEvery(Number(event.target.value));
-                    }}
-                    disabled={fillIntensity === "off"}
-                  >
-                    {[1, 2, 4, 8].map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </section>
-
-            <section className="section-card">
-              <div className="section-card-head">
                 <h2>Preset</h2>
                 <p>Load a saved starting point without changing the generation or editing workflow.</p>
               </div>
@@ -2735,15 +2680,11 @@ function App() {
                 <p>Open hat, crash, and toms add release, punctuation, and movement.</p>
               </div>
 
-              <div className="band-grid band-grid-3">
-              <section className="instrument-card instrument-card-compact">
+              <div className="band-grid band-grid-accents">
+              <section className="instrument-card instrument-card-compact instrument-card-accent-knob instrument-card-hihat-open">
                 <div className="instrument-head">
                   <h3>Hi-Hat Open</h3>
-                  <p>Use it as a release layer that punctuates the pulse instead of carrying it.</p>
-                </div>
-
-                <div className="instrument-body">
-                  <label className="field-checkbox">
+                  <label className="field-checkbox field-checkbox-icon" aria-label="Hi-Hat Open enabled">
                     <input
                       type="checkbox"
                       checked={hihatOpenEnabled}
@@ -2754,67 +2695,46 @@ function App() {
                     />
                     <span>Enabled</span>
                   </label>
+                  <p>Use it as a release layer that punctuates the pulse instead of carrying it.</p>
+                </div>
 
-                  <label className="field">
-                    <span>Density</span>
-                    <input
-                      type="number"
+                <div className="instrument-body">
+                  <div className="accent-density-control hihat-open-density-control">
+                    <KnobControl
+                      label="Density"
                       min={0}
                       max={1}
                       step={0.01}
                       value={hihatOpenDensity}
-                      onChange={(event) => {
+                      onChange={(nextValue) => {
                         switchToCustomIfNeeded();
-                        setHihatOpenDensity(Number(event.target.value));
+                        setHihatOpenDensity(nextValue);
                       }}
                     />
-                  </label>
+                  </div>
 
-                  <div className="field">
-                    <span>Velocity</span>
-                    <div className="range-fields">
-                      <label className="field">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={hihatOpenVelocityMin}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setHihatOpenVelocityMin(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span>Max</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={hihatOpenVelocityMax}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setHihatOpenVelocityMax(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-                    </div>
+                  <div className="accent-velocity-control hihat-open-velocity-control">
+                    <VelocityRangeControl
+                      label="Velocity"
+                      minValue={hihatOpenVelocityMin}
+                      maxValue={hihatOpenVelocityMax}
+                      min={1}
+                      max={127}
+                      step={1}
+                      onChange={(nextMin, nextMax) => {
+                        switchToCustomIfNeeded();
+                        setHihatOpenVelocityMin(nextMin);
+                        setHihatOpenVelocityMax(nextMax);
+                      }}
+                    />
                   </div>
                 </div>
               </section>
 
-              <section className="instrument-card instrument-card-compact">
+              <section className="instrument-card instrument-card-compact instrument-card-accent-knob instrument-card-crash">
                 <div className="instrument-head">
                   <h3>Crash</h3>
-                  <p>Use it for accent hits that frame sections without turning into a continuous layer.</p>
-                </div>
-
-                <div className="instrument-body">
-                  <label className="field-checkbox">
+                  <label className="field-checkbox field-checkbox-icon" aria-label="Crash enabled">
                     <input
                       type="checkbox"
                       checked={crashEnabled}
@@ -2825,147 +2745,167 @@ function App() {
                     />
                     <span>Enabled</span>
                   </label>
+                  <p>Use it for accent hits that frame sections without turning into a continuous layer.</p>
+                </div>
 
-                  <label className="field">
-                    <span>Density</span>
-                    <input
-                      type="number"
+                <div className="instrument-body">
+                  <div className="accent-density-control crash-density-control">
+                    <KnobControl
+                      label="Density"
                       min={0}
                       max={1}
                       step={0.01}
                       value={crashDensity}
-                      onChange={(event) => {
+                      onChange={(nextValue) => {
                         switchToCustomIfNeeded();
-                        setCrashDensity(Number(event.target.value));
+                        setCrashDensity(nextValue);
                       }}
                     />
-                  </label>
+                  </div>
 
-                  <div className="field">
-                    <span>Velocity</span>
-                    <div className="range-fields">
-                      <label className="field">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={crashVelocityMin}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setCrashVelocityMin(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span>Max</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={crashVelocityMax}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setCrashVelocityMax(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-                    </div>
+                  <div className="accent-velocity-control crash-velocity-control">
+                    <VelocityRangeControl
+                      label="Velocity"
+                      minValue={crashVelocityMin}
+                      maxValue={crashVelocityMax}
+                      min={1}
+                      max={127}
+                      step={1}
+                      onChange={(nextMin, nextMax) => {
+                        switchToCustomIfNeeded();
+                        setCrashVelocityMin(nextMin);
+                        setCrashVelocityMax(nextMax);
+                      }}
+                    />
                   </div>
                 </div>
               </section>
 
-              <section className="instrument-card instrument-card-compact">
+              <section className="instrument-card instrument-card-compact instrument-card-accent-knob instrument-card-toms">
                 <div className="instrument-head">
                   <h3>Toms</h3>
                   <p>Shape tom movement as one family, with separate hit budgets and shared dynamics.</p>
                 </div>
 
                 <div className="instrument-body">
-                  <div className="inline-fields">
-                    <label className="field">
-                      <span>High Hits</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={3}
-                        step={1}
-                        value={tomsHighHits}
-                        onChange={(event) => {
+                  <div className="toms-hit-controls">
+                    <div className="toms-hit-control">
+                      <HandleOptionSliderControl
+                        label="High Hits"
+                        value={String(tomsHighHits)}
+                        options={TOMS_HIT_OPTIONS}
+                        orientation="vertical"
+                        onChange={(nextValue) => {
                           switchToCustomIfNeeded();
-                          setTomsHighHits(Number(event.target.value));
+                          setTomsHighHits(Number(nextValue));
                         }}
                       />
-                    </label>
+                    </div>
 
-                    <label className="field">
-                      <span>Mid Hits</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={3}
-                        step={1}
-                        value={tomsMidHits}
-                        onChange={(event) => {
+                    <div className="toms-hit-control">
+                      <HandleOptionSliderControl
+                        label="Mid Hits"
+                        value={String(tomsMidHits)}
+                        options={TOMS_HIT_OPTIONS}
+                        orientation="vertical"
+                        onChange={(nextValue) => {
                           switchToCustomIfNeeded();
-                          setTomsMidHits(Number(event.target.value));
+                          setTomsMidHits(Number(nextValue));
                         }}
                       />
-                    </label>
+                    </div>
 
-                    <label className="field">
-                      <span>Low Hits</span>
-                      <input
-                        type="number"
-                        min={0}
-                        max={3}
-                        step={1}
-                        value={tomsLowHits}
-                        onChange={(event) => {
+                    <div className="toms-hit-control">
+                      <HandleOptionSliderControl
+                        label="Low Hits"
+                        value={String(tomsLowHits)}
+                        options={TOMS_HIT_OPTIONS}
+                        orientation="vertical"
+                        onChange={(nextValue) => {
                           switchToCustomIfNeeded();
-                          setTomsLowHits(Number(event.target.value));
+                          setTomsLowHits(Number(nextValue));
                         }}
                       />
-                    </label>
-                  </div>
-
-                  <div className="field">
-                    <span>Velocity</span>
-                    <div className="range-fields">
-                      <label className="field">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={tomsVelocityMin}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setTomsVelocityMin(Number(event.target.value));
-                          }}
-                        />
-                      </label>
-
-                      <label className="field">
-                        <span>Max</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={127}
-                          step={1}
-                          value={tomsVelocityMax}
-                          onChange={(event) => {
-                            switchToCustomIfNeeded();
-                            setTomsVelocityMax(Number(event.target.value));
-                          }}
-                        />
-                      </label>
                     </div>
                   </div>
+
+                  <div className="accent-velocity-control toms-velocity-control">
+                    <VelocityRangeControl
+                      label="Velocity"
+                      minValue={tomsVelocityMin}
+                      maxValue={tomsVelocityMax}
+                      min={1}
+                      max={127}
+                      step={1}
+                      onChange={(nextMin, nextMax) => {
+                        switchToCustomIfNeeded();
+                        setTomsVelocityMin(nextMin);
+                        setTomsVelocityMax(nextMax);
+                      }}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="instrument-card instrument-card-compact instrument-card-fill">
+                <div className="instrument-head">
+                  <h3>Fill</h3>
+                  <p>Control how often fills appear and how far they stretch the phrase.</p>
+                </div>
+
+                <div className="instrument-body">
+                  <label className="field">
+                    <span>Intensity</span>
+                    <select
+                      value={fillIntensity}
+                      onChange={(event) => {
+                        switchToCustomIfNeeded();
+                        setFillIntensity(event.target.value as "off" | "low" | "medium" | "high");
+                      }}
+                    >
+                      {["off", "low", "medium", "high"].map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className={`field ${fillIntensity === "off" ? "field-muted" : ""}`}>
+                    <span>Length</span>
+                    <select
+                      value={fillLength}
+                      onChange={(event) => {
+                        switchToCustomIfNeeded();
+                        setFillLength(event.target.value as "short" | "medium" | "long");
+                      }}
+                      disabled={fillIntensity === "off"}
+                    >
+                      {["short", "medium", "long"].map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className={`field ${fillIntensity === "off" ? "field-muted" : ""}`}>
+                    <span>Every</span>
+                    <select
+                      value={fillEvery}
+                      onChange={(event) => {
+                        switchToCustomIfNeeded();
+                        setFillEvery(Number(event.target.value));
+                      }}
+                      disabled={fillIntensity === "off"}
+                    >
+                      {[1, 2, 4, 8].map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
               </section>
               </div>
