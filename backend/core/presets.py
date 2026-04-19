@@ -5,9 +5,24 @@ from copy import deepcopy
 from core.instruments import build_default_instruments
 from core.pattern import GlobalSettings, InstrumentConfig
 
+VELOCITY_PRESET_DROP = 20
+
 
 def _sync(level: int) -> float:
     return max(0.0, min(1.0, level / 5))
+
+
+def _drop_velocity(value: int, amount: int = VELOCITY_PRESET_DROP) -> int:
+    return max(1, value - amount)
+
+
+def _apply_velocity_drop(instruments: dict[str, InstrumentConfig]) -> None:
+    for key, config in instruments.items():
+        if key != "hihat_closed":
+            config.velocity_min = _drop_velocity(config.velocity_min)
+            config.velocity_max = _drop_velocity(config.velocity_max)
+        if config.ghost_settings is not None:
+            config.ghost_settings.velocity_min, config.ghost_settings.velocity_max = config.ghost_settings.velocity_bounds()
 
 
 PRESET_DEFINITIONS: dict[str, dict[str, object]] = {
@@ -532,5 +547,7 @@ def load_preset(name: str) -> tuple[GlobalSettings, dict[str, InstrumentConfig]]
                 config.ghost_settings.velocity_min, config.ghost_settings.velocity_max = config.ghost_settings.velocity_bounds()
                 continue
             setattr(config, key, value)
+
+    _apply_velocity_drop(instruments)
 
     return deepcopy(settings), deepcopy(instruments)

@@ -131,7 +131,7 @@ function velocityLayerForInstrument(instrument: string, velocity: number): numbe
 function playbackVolume(velocity: number, hitType: PatternEvent["hit_type"]): number {
   let volume = Math.max(0.15, Math.min(1, velocity / 127));
   if (hitType === "ghost") {
-    volume = Math.min(1, volume * 1.12);
+    volume = Math.min(1, volume * 2.00);
   }
   return volume;
 }

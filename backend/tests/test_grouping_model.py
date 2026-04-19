@@ -644,6 +644,209 @@ class GroupingModelTests(unittest.TestCase):
         self.assertGreaterEqual(count_fill_voice_hits(high_pattern), 2)
         self.assertLessEqual(count_fill_pulse_hits(high_pattern), count_fill_pulse_hits(medium_pattern))
 
+    def test_fill_medium_guarantees_at_least_one_hit_per_active_fill_slot(self) -> None:
+        settings = GlobalSettings(
+            grouping="4",
+            bars=4,
+            fill_every=4,
+            fill_length="medium",
+            fill_intensity="medium",
+            seed=23,
+            humanize_velocity=0,
+            bar_similarity=0.0,
+        )
+
+        pattern = DrumPatternGenerator().generate(settings, build_default_instruments())
+        last_bar = pattern.bars[3]
+        active_slots = set(last_bar.fill_active_slots)
+        occupied_slots = {
+            hit.slot_index
+            for hit in last_bar.hits
+            if hit.slot_index in active_slots and hit.hit_type != "ghost"
+        }
+
+        self.assertTrue(active_slots)
+        self.assertTrue(active_slots.issubset(occupied_slots))
+
+    def test_fill_medium_guarantee_survives_bar_similarity(self) -> None:
+        settings = GlobalSettings(
+            grouping="4",
+            bars=4,
+            fill_every=4,
+            fill_length="medium",
+            fill_intensity="medium",
+            seed=23,
+            humanize_velocity=0,
+            bar_similarity=0.85,
+        )
+
+        pattern = DrumPatternGenerator().generate(settings, build_default_instruments())
+        last_bar = pattern.bars[3]
+        active_slots = set(last_bar.fill_active_slots)
+        occupied_slots = {
+            hit.slot_index
+            for hit in last_bar.hits
+            if hit.slot_index in active_slots and hit.hit_type != "ghost"
+        }
+
+        self.assertTrue(active_slots)
+        self.assertTrue(active_slots.issubset(occupied_slots))
+
+    def test_fill_low_region_survives_bar_similarity_without_rewrite(self) -> None:
+        base_settings = dict(
+            grouping="4",
+            bars=4,
+            fill_every=4,
+            fill_length="medium",
+            fill_intensity="low",
+            seed=23,
+            humanize_velocity=0,
+        )
+
+        pattern_without_similarity = DrumPatternGenerator().generate(
+            GlobalSettings(**base_settings, bar_similarity=0.0),
+            build_default_instruments(),
+        )
+        pattern_with_similarity = DrumPatternGenerator().generate(
+            GlobalSettings(**base_settings, bar_similarity=0.85),
+            build_default_instruments(),
+        )
+
+        def fill_signature(pattern):
+            fill_slots = set(pattern.bars[3].fill_region_slots)
+            return {
+                (hit.instrument, hit.slot_index, hit.hit_type)
+                for hit in pattern.bars[3].hits
+                if hit.slot_index in fill_slots and hit.hit_type != "ghost"
+            }
+
+        self.assertEqual(fill_signature(pattern_without_similarity), fill_signature(pattern_with_similarity))
+
+    def test_fill_high_survives_bar_similarity_with_hits_in_active_slots(self) -> None:
+        settings = GlobalSettings(
+            grouping="4",
+            bars=4,
+            fill_every=4,
+            fill_length="medium",
+            fill_intensity="high",
+            seed=23,
+            humanize_velocity=0,
+            bar_similarity=0.85,
+        )
+        instruments = build_default_instruments()
+        instruments["hihat_open"].enabled = False
+        instruments["crash"].enabled = False
+        instruments["tom_high"].enabled = True
+        instruments["tom_high"].tom_hit_count = 2
+        instruments["tom_mid"].enabled = True
+        instruments["tom_mid"].tom_hit_count = 2
+
+        pattern = DrumPatternGenerator().generate(settings, instruments)
+        last_bar = pattern.bars[3]
+        active_slots = set(last_bar.fill_active_slots)
+        occupied_slots = {
+            hit.slot_index
+            for hit in last_bar.hits
+            if hit.slot_index in active_slots and hit.hit_type != "ghost"
+        }
+
+        self.assertTrue(active_slots)
+        self.assertGreaterEqual(len(occupied_slots), max(1, len(active_slots) - 1))
+
+    def test_fill_high_short_uses_two_snare_hits(self) -> None:
+        settings = GlobalSettings(
+            grouping="4",
+            bars=4,
+            fill_every=4,
+            fill_length="short",
+            fill_intensity="high",
+            seed=23,
+            humanize_velocity=0,
+            bar_similarity=0.0,
+        )
+        instruments = build_default_instruments()
+        instruments["hihat_open"].enabled = True
+        instruments["crash"].enabled = True
+        instruments["tom_high"].enabled = True
+        instruments["tom_high"].tom_hit_count = 2
+
+        pattern = DrumPatternGenerator().generate(settings, instruments)
+        last_bar = pattern.bars[3]
+        active_slots = set(last_bar.fill_active_slots)
+        fill_hits = [
+            hit for hit in last_bar.hits
+            if hit.slot_index in active_slots and hit.hit_type != "ghost"
+        ]
+
+        self.assertEqual(len(active_slots), 2)
+        self.assertEqual({hit.instrument for hit in fill_hits}, {"snare"})
+        self.assertEqual({hit.slot_index for hit in fill_hits}, active_slots)
+
+    def test_fill_high_medium_uses_two_snare_and_one_accent_when_available(self) -> None:
+        settings = GlobalSettings(
+            grouping="4",
+            bars=4,
+            fill_every=4,
+            fill_length="medium",
+            fill_intensity="high",
+            seed=23,
+            humanize_velocity=0,
+            bar_similarity=0.0,
+        )
+        instruments = build_default_instruments()
+        instruments["hihat_open"].enabled = False
+        instruments["crash"].enabled = False
+        instruments["tom_high"].enabled = True
+        instruments["tom_high"].tom_hit_count = 2
+
+        pattern = DrumPatternGenerator().generate(settings, instruments)
+        last_bar = pattern.bars[3]
+        active_slots = set(last_bar.fill_active_slots)
+        fill_hits = [
+            hit for hit in last_bar.hits
+            if hit.slot_index in active_slots and hit.hit_type != "ghost"
+        ]
+
+        self.assertEqual(len(active_slots), 3)
+        self.assertEqual(len([hit for hit in fill_hits if hit.instrument == "snare"]), 2)
+        self.assertEqual(len([hit for hit in fill_hits if hit.instrument.startswith("tom_")]), 1)
+
+    def test_fill_high_long_uses_two_snare_and_two_accents_when_available(self) -> None:
+        settings = GlobalSettings(
+            grouping="4",
+            bars=4,
+            fill_every=4,
+            fill_length="long",
+            fill_intensity="high",
+            seed=23,
+            humanize_velocity=0,
+            bar_similarity=0.0,
+        )
+        instruments = build_default_instruments()
+        instruments["hihat_open"].enabled = True
+        instruments["crash"].enabled = False
+        instruments["tom_high"].enabled = True
+        instruments["tom_high"].tom_hit_count = 2
+
+        pattern = DrumPatternGenerator().generate(settings, instruments)
+        last_bar = pattern.bars[3]
+        active_slots = set(last_bar.fill_active_slots)
+        fill_hits = [
+            hit for hit in last_bar.hits
+            if hit.slot_index in active_slots and hit.hit_type != "ghost"
+        ]
+
+        accent_count = sum(
+            1
+            for hit in fill_hits
+            if hit.instrument in {"hihat_open", "crash", "tom_high", "tom_mid", "tom_low"}
+        )
+        snare_count = sum(1 for hit in fill_hits if hit.instrument == "snare")
+
+        self.assertEqual(len(active_slots), 4)
+        self.assertEqual(snare_count, 2)
+        self.assertEqual(accent_count, 2)
+
     def test_fill_medium_and_high_make_toms_observably_present_when_enabled(self) -> None:
         instruments = build_default_instruments()
         instruments["hihat_open"].enabled = False

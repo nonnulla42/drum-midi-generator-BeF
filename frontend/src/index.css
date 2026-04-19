@@ -316,6 +316,41 @@ summary {
   min-width: 0;
 }
 
+.seed-field {
+  position: relative;
+}
+
+.seed-field-warning input {
+  border-color: rgba(164, 140, 255, 0.82);
+  box-shadow:
+    0 0 0 1px rgba(164, 140, 255, 0.42),
+    0 0 18px rgba(164, 140, 255, 0.18);
+}
+
+.seed-field-notice {
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  top: 31px;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  color: rgba(232, 238, 255, 0.9);
+  text-align: center;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.46);
+}
+
+.seed-field-notice-visible {
+  opacity: 0.72;
+  transform: translateY(0);
+}
+
 .field span,
 .field-checkbox span {
   font-size: 0.72rem;
@@ -561,7 +596,7 @@ summary {
   width: 92px;
   height: 92px;
   border-radius: 50%;
-  cursor: ns-resize;
+  cursor: default;
   touch-action: none;
   outline: none;
 }
@@ -649,7 +684,7 @@ summary {
 .stepped-slider {
   padding: 4px 2px 2px;
   outline: none;
-  cursor: ew-resize;
+  cursor: default;
   touch-action: none;
 }
 
@@ -719,7 +754,7 @@ summary {
 .continuous-slider {
   padding: 4px 2px 2px;
   outline: none;
-  cursor: ew-resize;
+  cursor: default;
   touch-action: none;
 }
 
@@ -922,7 +957,7 @@ summary {
 }
 
 .timing-feel-button-active {
-  background: linear-gradient(180deg, rgba(127, 220, 155, 0.38) 0%, rgba(93, 193, 128, 0.52) 100%);
+  background: linear-gradient(180deg, rgba(0, 255, 81, 0.38) 0%, rgba(29, 61, 40, 0.52) 75%);
   border-color: rgba(127, 220, 155, 0.48);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
@@ -984,7 +1019,7 @@ summary {
 .velocity-range-slider {
   position: relative;
   height: 28px;
-  cursor: ew-resize;
+  cursor: default;
   touch-action: none;
 }
 
@@ -1083,7 +1118,7 @@ summary {
 
 .vertical-slider {
   outline: none;
-  cursor: ew-resize;
+  cursor: default;
   touch-action: none;
 }
 
@@ -1997,6 +2032,13 @@ button:disabled {
   transform: translateY(calc(var(--panel-label-lift) + 4px));
 }
 
+.kick-top-cell-density .knob-control-head span,
+.snare-top-cell-density .knob-control-head span,
+.hihat-open-density-control .knob-control-head span,
+.crash-density-control .knob-control-head span {
+  color: #ada7d2;
+}
+
 .hihat-closed-top-cell-timing .timing-feel-control,
 .ride-top-cell-timing .timing-feel-control {
   width: 100%;
@@ -2659,6 +2701,14 @@ button:disabled {
   min-height: 0;
   overflow: auto;
   padding-bottom: 4px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.pattern-grid-scroll::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 .pattern-grid-scroll-locked {
@@ -2683,11 +2733,56 @@ button:disabled {
 }
 
 .pattern-row-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 6px;
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #b9afea;
+  background:
+    linear-gradient(180deg, rgba(17, 24, 37, 0.96) 0%, rgba(12, 18, 28, 0.98) 100%);
+  box-shadow: 10px 0 10px rgba(12, 18, 28, 0.9);
+}
+
+.pattern-row-lock {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(150, 173, 214, 0.55);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.pattern-row-lock:hover:enabled {
+  background: transparent;
+  border-color: transparent;
+  color: rgba(200, 189, 253, 0.92);
+  box-shadow: none;
+}
+
+.pattern-row-lock:disabled {
+  opacity: 0.35;
+}
+
+.pattern-row-lock svg {
+  width: 14px;
+  height: 14px;
+}
+
+.pattern-row-lock-locked {
+  color: #c8bdfd;
 }
 
 .pattern-row-bars {
@@ -2771,7 +2866,7 @@ button:disabled {
 
 .pattern-offset {
   position: absolute;
-  top: -1px;
+  
   font-size: 0.70rem;
   line-height: 2;
   font-weight: 500;
@@ -2781,10 +2876,12 @@ button:disabled {
 
 .pattern-offset-left {
   left: -6px;
+  top: 5px;
 }
 
 .pattern-offset-right {
   right: -6px;
+  top: -5px;
 }
 
 .pattern-empty {

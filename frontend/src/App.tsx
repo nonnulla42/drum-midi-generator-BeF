@@ -1,4 +1,4 @@
-import { FormEvent, type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, type KeyboardEvent, type PointerEvent, type WheelEvent, useEffect, useRef, useState } from "react";
 
 import {
   addPatternBaseHit,
@@ -23,8 +23,8 @@ const DEFAULT_KICK = {
   density: 0.45,
   syncopation: 2,
   timingFeel: "neutral" as const,
-  velocityMin: 84,
-  velocityMax: 118,
+  velocityMin: 64,
+  velocityMax: 98,
 };
 
 const DEFAULT_SNARE = {
@@ -32,8 +32,8 @@ const DEFAULT_SNARE = {
   density: 0.4,
   syncopation: 1,
   timingFeel: "neutral" as const,
-  velocityMin: 78,
-  velocityMax: 114,
+  velocityMin: 58,
+  velocityMax: 94,
   ghost: {
     enabled: true,
     density: 0.28,
@@ -62,8 +62,8 @@ const DEFAULT_RIDE = {
   division: "eighth" as const,
   space: 0,
   timingFeel: "neutral" as const,
-  velocityMin: 66,
-  velocityMax: 94,
+  velocityMin: 46,
+  velocityMax: 74,
   ghost: {
     enabled: true,
     density: 0.12,
@@ -75,23 +75,23 @@ const DEFAULT_RIDE = {
 const DEFAULT_HIHAT_OPEN = {
   enabled: true,
   density: 0.18,
-  velocityMin: 68,
-  velocityMax: 96,
+  velocityMin: 48,
+  velocityMax: 76,
 };
 
 const DEFAULT_CRASH = {
   enabled: true,
   density: 0.12,
-  velocityMin: 96,
-  velocityMax: 112,
+  velocityMin: 76,
+  velocityMax: 92,
 };
 
 const DEFAULT_TOMS = {
   highHits: 0,
   midHits: 0,
   lowHits: 0,
-  velocityMin: 74,
-  velocityMax: 106,
+  velocityMin: 54,
+  velocityMax: 86,
 };
 
 const SYNCOPATION_OPTIONS = [
@@ -231,6 +231,40 @@ function hitPriority(hitType: PatternEvent["hit_type"]): number {
   return 2;
 }
 
+function sortPatternEvents(events: PatternEvent[]): PatternEvent[] {
+  return [...events].sort((left, right) => {
+    if (left.bar !== right.bar) {
+      return left.bar - right.bar;
+    }
+    if (left.slot !== right.slot) {
+      return left.slot - right.slot;
+    }
+    return hitPriority(left.hit_type) - hitPriority(right.hit_type);
+  });
+}
+
+function mergeLockedInstrumentEvents(
+  currentPattern: GeneratedPattern | null,
+  nextPattern: GeneratedPattern,
+  lockedInstruments: string[],
+): GeneratedPattern {
+  if (!currentPattern || lockedInstruments.length === 0) {
+    return nextPattern;
+  }
+
+  const mergedEvents = { ...nextPattern.events };
+  for (const instrument of lockedInstruments) {
+    const preservedVisibleHits = (currentPattern.events[instrument] ?? []).filter((event) => event.hit_type !== "ghost");
+    const regeneratedGhostHits = (nextPattern.events[instrument] ?? []).filter((event) => event.hit_type === "ghost");
+    mergedEvents[instrument] = sortPatternEvents([...preservedVisibleHits, ...regeneratedGhostHits]);
+  }
+
+  return {
+    ...nextPattern,
+    events: mergedEvents,
+  };
+}
+
 function buildGridRows(pattern: GeneratedPattern) {
   const fillLookup = new Set(pattern.fill_regions.flatMap((region) => region.slots.map((slot) => `${region.bar}:${slot}`)));
 
@@ -273,6 +307,38 @@ function buildPlaceholderGridRows() {
       })),
     ],
   }));
+}
+
+function LockIcon({ locked }: { locked: boolean }) {
+  if (locked) {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path
+          d="M5 7V5.5a3 3 0 1 1 6 0V7"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M5 7V5.5a3 3 0 0 1 5.1-2.1"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  );
 }
 
 function velocityColor(velocity: number): string {
@@ -381,6 +447,18 @@ function KnobControl({ label, value, min, max, step, onChange }: KnobControlProp
     }
   }
 
+  function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    event.preventDefault();
+    if (event.deltaY < 0) {
+      commitValue(value + step);
+      return;
+    }
+
+    if (event.deltaY > 0) {
+      commitValue(value - step);
+    }
+  }
+
   return (
     <div className="knob-control">
       <div className="knob-control-head">
@@ -405,6 +483,7 @@ function KnobControl({ label, value, min, max, step, onChange }: KnobControlProp
           dragStateRef.current = null;
         }}
         onKeyDown={handleKeyDown}
+        onWheel={handleWheel}
       >
         <div className="knob-face">
           <span className="knob-indicator" style={{ transform: `translateX(-50%) rotate(${angle}deg)` }} />
@@ -1324,6 +1403,7 @@ function App() {
   const [tomsVelocityMin, setTomsVelocityMin] = useState(DEFAULT_TOMS.velocityMin);
   const [tomsVelocityMax, setTomsVelocityMax] = useState(DEFAULT_TOMS.velocityMax);
   const [pattern, setPattern] = useState<GeneratedPattern | null>(null);
+  const [lockedInstruments, setLockedInstruments] = useState<string[]>([]);
   const [isLoadingPresets, setIsLoadingPresets] = useState(true);
   const [isGeneratingPattern, setIsGeneratingPattern] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -1340,8 +1420,12 @@ function App() {
   } | null>(null);
   const [loadError, setLoadError] = useState("");
   const [generateError, setGenerateError] = useState("");
+  const [seedFixedWarningVisible, setSeedFixedWarningVisible] = useState(false);
   const [ghostRerollCount, setGhostRerollCount] = useState(0);
   const patternPlayerRef = useRef<PatternPlayer | null>(null);
+  const lockResetKeyRef = useRef(`${bars}:${normalizeGrouping(grouping)}`);
+  const lastGenerateSignatureRef = useRef<string | null>(null);
+  const seedWarningTimeoutRef = useRef<number | null>(null);
 
   const currentGroupingError = groupingError(grouping);
   const kickVelocityError =
@@ -1362,6 +1446,21 @@ function App() {
   const timeSignature = timeSignatureFromGrouping(grouping);
   const gridRows = pattern ? buildGridRows(pattern) : [];
   const placeholderGridRows = buildPlaceholderGridRows();
+
+  useEffect(() => {
+    const nextKey = `${bars}:${normalizeGrouping(grouping)}`;
+    if (lockResetKeyRef.current === nextKey) {
+      return;
+    }
+    lockResetKeyRef.current = nextKey;
+    setLockedInstruments([]);
+  }, [bars, grouping]);
+
+  useEffect(() => {
+    if (!pattern) {
+      setLockedInstruments([]);
+    }
+  }, [pattern]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1401,6 +1500,9 @@ function App() {
   useEffect(() => {
     return () => {
       patternPlayerRef.current?.stop();
+      if (seedWarningTimeoutRef.current !== null) {
+        window.clearTimeout(seedWarningTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -1431,7 +1533,6 @@ function App() {
       setSelectedPreset(CUSTOM_PRESET_ID);
     }
     stopPlaybackStatefully();
-    setPattern(null);
   }
 
   function applyPreset(preset: Preset) {
@@ -1501,7 +1602,6 @@ function App() {
     setTomsVelocityMin(preset.toms.velocity_min);
     setTomsVelocityMax(preset.toms.velocity_max);
     stopPlaybackStatefully();
-    setPattern(null);
     setGhostRerollCount(0);
     setGenerateError("");
   }
@@ -1510,7 +1610,6 @@ function App() {
     if (value === CUSTOM_PRESET_ID) {
       setSelectedPreset(CUSTOM_PRESET_ID);
       stopPlaybackStatefully();
-      setPattern(null);
       return;
     }
 
@@ -1681,6 +1780,21 @@ function App() {
     }
   }
 
+  function handlePatternGridWheel(event: WheelEvent<HTMLDivElement>) {
+    const container = event.currentTarget;
+    if (container.scrollWidth <= container.clientWidth) {
+      return;
+    }
+
+    const dominantDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+    if (dominantDelta === 0) {
+      return;
+    }
+
+    container.scrollLeft += dominantDelta;
+    event.preventDefault();
+  }
+
   async function handleGeneratePattern(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1694,9 +1808,25 @@ function App() {
     setIsGeneratingPattern(true);
 
     try {
-      const nextPattern = await generatePattern(buildRequest());
-      setPattern(nextPattern);
+      const request = buildRequest();
+      const requestSignature = JSON.stringify(request);
+      const shouldShowFixedSeedWarning =
+        request.seed !== undefined && lastGenerateSignatureRef.current === requestSignature;
+      const currentPattern = pattern;
+      const nextPattern = await generatePattern(request);
+      setPattern(mergeLockedInstrumentEvents(currentPattern, nextPattern, lockedInstruments));
       setGhostRerollCount(0);
+      lastGenerateSignatureRef.current = requestSignature;
+      if (shouldShowFixedSeedWarning) {
+        setSeedFixedWarningVisible(true);
+        if (seedWarningTimeoutRef.current !== null) {
+          window.clearTimeout(seedWarningTimeoutRef.current);
+        }
+        seedWarningTimeoutRef.current = window.setTimeout(() => {
+          setSeedFixedWarningVisible(false);
+          seedWarningTimeoutRef.current = null;
+        }, 5000);
+      }
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to generate pattern.");
     } finally {
@@ -1832,8 +1962,21 @@ function App() {
   function handleClearPattern() {
     stopPlaybackStatefully();
     setPattern(null);
+    setLockedInstruments([]);
     setGhostRerollCount(0);
     setGenerateError("");
+  }
+
+  function handleToggleInstrumentLock(instrument: string) {
+    if (!pattern) {
+      return;
+    }
+
+    setLockedInstruments((current) =>
+      current.includes(instrument)
+        ? current.filter((item) => item !== instrument)
+        : [...current, instrument],
+    );
   }
 
   function handleRandomizeParameters() {
@@ -1944,7 +2087,7 @@ function App() {
                 </label>
               </div>
 
-              <label className="field">
+              <label className={`field seed-field ${seedFixedWarningVisible ? "seed-field-warning" : ""}`}>
                 <span>Seed</span>
                 <input
                   type="number"
@@ -1962,6 +2105,9 @@ function App() {
                     setSeed(Number(value));
                   }}
                 />
+                <span className={`seed-field-notice ${seedFixedWarningVisible ? "seed-field-notice-visible" : ""}`}>
+                  Pattern unchanged because the seed is fixed.
+                </span>
               </label>
             </section>
 
@@ -2999,11 +3145,27 @@ function App() {
             </div>
 
             {pattern ? (
-              <div className={`pattern-grid-scroll ${isEditGridEnabled ? "" : "pattern-grid-scroll-locked"}`}>
+              <div
+                className={`pattern-grid-scroll ${isEditGridEnabled ? "" : "pattern-grid-scroll-locked"}`}
+                onWheel={handlePatternGridWheel}
+              >
                 <div className="pattern-grid">
                   {gridRows.map((row) => (
                     <div key={row.instrument} className="pattern-row">
-                      <div className="pattern-row-label">{row.label}</div>
+                      <div className="pattern-row-label">
+                        <button
+                          type="button"
+                          className={`pattern-row-lock ${lockedInstruments.includes(row.instrument) ? "pattern-row-lock-locked" : ""}`}
+                          aria-label={lockedInstruments.includes(row.instrument) ? `Unlock ${row.label}` : `Lock ${row.label}`}
+                          aria-pressed={lockedInstruments.includes(row.instrument)}
+                          onClick={() => {
+                            handleToggleInstrumentLock(row.instrument);
+                          }}
+                        >
+                          <LockIcon locked={lockedInstruments.includes(row.instrument)} />
+                        </button>
+                        <span>{row.label}</span>
+                      </div>
 
                       <div className="pattern-row-bars">
                         {row.bars.map((bar, barIndex) => (
@@ -3087,11 +3249,19 @@ function App() {
                 </div>
               </div>
             ) : (
-              <div className="pattern-grid-scroll pattern-grid-scroll-placeholder pattern-grid-scroll-locked">
+              <div
+                className="pattern-grid-scroll pattern-grid-scroll-placeholder pattern-grid-scroll-locked"
+                onWheel={handlePatternGridWheel}
+              >
                 <div className="pattern-grid">
                   {placeholderGridRows.map((row) => (
                     <div key={row.instrument} className="pattern-row pattern-row-placeholder">
-                      <div className="pattern-row-label">{row.label}</div>
+                      <div className="pattern-row-label">
+                        <button type="button" className="pattern-row-lock" disabled aria-label={`Lock ${row.label}`}>
+                          <LockIcon locked={false} />
+                        </button>
+                        <span>{row.label}</span>
+                      </div>
 
                       <div className="pattern-row-bars">
                         {row.bars.map((bar, barIndex) => (

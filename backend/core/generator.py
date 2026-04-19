@@ -47,6 +47,7 @@ class DrumPatternGenerator:
         accent_slots = metric_accent_slots(settings)
         fill_regions = build_fill_regions(settings)
         fill_regions_by_bar = {region.bar_index: region for region in fill_regions}
+        fill_region_snapshots: dict[int, list[DrumHit]] = {}
         bars: list[DrumBar] = []
         previous_slots: dict[str, set[int]] = defaultdict(set)
 
@@ -141,6 +142,7 @@ class DrumPatternGenerator:
                 rng,
                 bar_hits,
             )
+            fill_region_snapshots[bar.index] = self._snapshot_fill_region_hits(bar)
         if bars:
             reference_bar = bars[0]
             for bar in bars[1:]:
@@ -152,6 +154,42 @@ class DrumPatternGenerator:
                     rng=rng,
                     bar_hits=self._collect_bar_hits(bar),
                     structural_slots=structural_slots,
+                )
+        for bar in bars:
+            fill_region = fill_regions_by_bar.get(bar.index)
+            if fill_region is None:
+                continue
+            bar_hits = self._collect_bar_hits(bar)
+            if fill_region.intensity == "low":
+                self._restore_fill_region_snapshot(
+                    bar,
+                    fill_region_snapshots.get(bar.index, []),
+                    bar_hits,
+                )
+            elif bar.fill_active_slots:
+                self._apply_fill_region(
+                    bar,
+                    fill_region,
+                    bar.fill_active_slots,
+                    group_segments,
+                    instruments,
+                    rng,
+                    bar_hits,
+                )
+            self._validate_kick_snare_bar(
+                bar,
+                bar_hits,
+                structural_slots["kick"],
+                structural_slots["snare"],
+            )
+            if bar.fill_active_slots:
+                self._ensure_fill_slot_coverage(
+                    bar,
+                    instruments,
+                    bar.fill_active_slots,
+                    fill_region.intensity,
+                    rng,
+                    bar_hits,
                 )
         self._enforce_odd_tom_output(bars)
         for bar in bars:
@@ -1038,6 +1076,51 @@ class DrumPatternGenerator:
             hits[hit.instrument].add(hit.slot_index)
         return hits
 
+    def _snapshot_fill_region_hits(self, bar: DrumBar) -> list[DrumHit]:
+        fill_slots = set(bar.fill_region_slots)
+        return [
+            DrumHit(
+                instrument=hit.instrument,
+                midi_note=hit.midi_note,
+                slot_index=hit.slot_index,
+                bar_index=hit.bar_index,
+                velocity=hit.velocity,
+                priority=hit.priority,
+                hit_type=hit.hit_type,
+                micro_timing_offset=hit.micro_timing_offset,
+                length_ticks=hit.length_ticks,
+                source=hit.source,
+            )
+            for hit in bar.hits
+            if hit.slot_index in fill_slots and hit.hit_type != HIT_GHOST
+        ]
+
+    def _restore_fill_region_snapshot(
+        self,
+        bar: DrumBar,
+        snapshot: list[DrumHit],
+        bar_hits: dict[str, set[int]],
+    ) -> None:
+        fill_slots = set(bar.fill_region_slots)
+        for hit in list(bar.hits):
+            if hit.slot_index in fill_slots and hit.hit_type != HIT_GHOST:
+                self._remove_hit(bar, hit, bar_hits)
+        for snap in snapshot:
+            restored = DrumHit(
+                instrument=snap.instrument,
+                midi_note=snap.midi_note,
+                slot_index=snap.slot_index,
+                bar_index=snap.bar_index,
+                velocity=snap.velocity,
+                priority=snap.priority,
+                hit_type=snap.hit_type,
+                micro_timing_offset=snap.micro_timing_offset,
+                length_ticks=snap.length_ticks,
+                source=snap.source,
+            )
+            bar.add_hit(restored)
+            bar_hits[restored.instrument].add(restored.slot_index)
+
     def _fill_active_slots(self, fill_region_slots: list[int]) -> list[int]:
         return [slot for slot in fill_region_slots if self._is_visible_odd_grid_slot(slot)]
 
@@ -1080,6 +1163,213 @@ class DrumPatternGenerator:
         )
         self._shape_fill_open_hat(bar, instruments["hihat_open"], fill_active_slots, intensity, rng, bar_hits)
         self._shape_fill_crash_edge(bar, instruments["crash"], intensity, rng, bar_hits)
+        self._shape_fill_high_signature(bar, instruments, fill_active_slots, intensity, rng, bar_hits)
+        self._ensure_fill_slot_coverage(bar, instruments, fill_active_slots, intensity, rng, bar_hits)
+
+    def _ensure_fill_slot_coverage(
+        self,
+        bar: DrumBar,
+        instruments: dict[str, InstrumentConfig],
+        fill_active_slots: list[int],
+        intensity: str,
+        rng: random.Random,
+        bar_hits: dict[str, set[int]],
+    ) -> None:
+        if intensity != "medium":
+            return
+        for slot in sorted(fill_active_slots):
+            if self._slot_has_any_hit(slot, bar_hits):
+                continue
+            if self._try_fill_slot_with_pulse(bar, slot, instruments, rng, bar_hits):
+                continue
+            if self._try_fill_slot_with_snare(bar, slot, instruments["snare"], rng, bar_hits):
+                continue
+            if self._try_fill_slot_with_tom(bar, slot, instruments, rng, bar_hits):
+                continue
+            if self._try_fill_slot_with_open_hat(bar, slot, instruments["hihat_open"], rng, bar_hits):
+                continue
+            self._try_fill_slot_with_kick(bar, slot, instruments["kick"], rng, bar_hits)
+
+    def _slot_has_any_hit(self, slot: int, bar_hits: dict[str, set[int]]) -> bool:
+        return any(slot in slots for slots in bar_hits.values())
+
+    def _shape_fill_high_signature(
+        self,
+        bar: DrumBar,
+        instruments: dict[str, InstrumentConfig],
+        fill_active_slots: list[int],
+        intensity: str,
+        rng: random.Random,
+        bar_hits: dict[str, set[int]],
+    ) -> None:
+        if intensity != "high":
+            return
+        snare_config = instruments["snare"]
+        if not snare_config.enabled:
+            return
+
+        ordered_slots = sorted(fill_active_slots)
+        if not ordered_slots:
+            return
+
+        for hit in list(bar.hits):
+            if hit.slot_index not in ordered_slots:
+                continue
+            if hit.hit_type == HIT_GHOST:
+                continue
+            self._remove_hit(bar, hit, bar_hits)
+
+        accent_configs = self._fill_high_accent_configs(instruments)
+        accent_slot_count = 0
+        if len(ordered_slots) >= 3 and accent_configs:
+            accent_slot_count = 1 if len(ordered_slots) == 3 else 2
+
+        accent_slots = ordered_slots[:accent_slot_count]
+        snare_slots = ordered_slots[accent_slot_count:]
+
+        for index, slot in enumerate(snare_slots):
+            priority = 0.84 + 0.12 * (index / max(1, len(snare_slots) - 1))
+            hit_type = HIT_ACCENT if slot == snare_slots[-1] else HIT_MAIN
+            self._add_hit(
+                bar,
+                snare_config,
+                slot,
+                hit_type,
+                rng,
+                bar_hits,
+                hit_priority=min(0.98, priority),
+            )
+
+        for slot, config in zip(accent_slots, self._fill_high_accent_sequence(accent_configs, len(accent_slots))):
+            if config.key.startswith("tom_") and not self._can_place_tom_slot(slot, config.key, bar_hits):
+                self._add_hit(bar, snare_config, slot, HIT_MAIN, rng, bar_hits, hit_priority=0.84)
+                continue
+            self._add_hit(
+                bar,
+                config,
+                slot,
+                HIT_MAIN,
+                rng,
+                bar_hits,
+                hit_priority=0.82,
+            )
+
+    def _fill_high_accent_configs(
+        self,
+        instruments: dict[str, InstrumentConfig],
+    ) -> list[InstrumentConfig]:
+        toms = [
+            instruments[key]
+            for key in ("tom_high", "tom_mid", "tom_low")
+            if instruments[key].enabled and instruments[key].tom_hit_count > 0
+        ]
+        toms.sort(key=lambda config: (-config.tom_hit_count, config.key))
+        accents: list[InstrumentConfig] = toms
+        if instruments["hihat_open"].enabled:
+            accents.append(instruments["hihat_open"])
+        if instruments["crash"].enabled:
+            accents.append(instruments["crash"])
+        return accents
+
+    def _fill_high_accent_sequence(
+        self,
+        accent_configs: list[InstrumentConfig],
+        count: int,
+    ) -> list[InstrumentConfig]:
+        if not accent_configs or count <= 0:
+            return []
+        return [accent_configs[index % len(accent_configs)] for index in range(count)]
+
+    def _try_fill_slot_with_pulse(
+        self,
+        bar: DrumBar,
+        slot: int,
+        instruments: dict[str, InstrumentConfig],
+        rng: random.Random,
+        bar_hits: dict[str, set[int]],
+    ) -> bool:
+        for key in ("hihat_closed", "ride"):
+            config = instruments[key]
+            if not config.enabled:
+                continue
+            allowed, forbidden = _slot_filters_for_config(config, bar.total_slots)
+            if not _slot_allowed(slot, allowed, forbidden):
+                continue
+            self._add_hit(bar, config, slot, HIT_MAIN, rng, bar_hits, hit_priority=0.74)
+            return True
+        return False
+
+    def _try_fill_slot_with_snare(
+        self,
+        bar: DrumBar,
+        slot: int,
+        config: InstrumentConfig,
+        rng: random.Random,
+        bar_hits: dict[str, set[int]],
+    ) -> bool:
+        if not config.enabled:
+            return False
+        if slot in bar_hits.get("kick", set()):
+            return False
+        self._add_hit(bar, config, slot, HIT_MAIN, rng, bar_hits, hit_priority=0.8)
+        return True
+
+    def _try_fill_slot_with_tom(
+        self,
+        bar: DrumBar,
+        slot: int,
+        instruments: dict[str, InstrumentConfig],
+        rng: random.Random,
+        bar_hits: dict[str, set[int]],
+    ) -> bool:
+        tom_configs = [
+            instruments[key]
+            for key in ("tom_high", "tom_mid", "tom_low")
+            if instruments[key].enabled and instruments[key].tom_hit_count > 0
+        ]
+        if not tom_configs:
+            return False
+        tom_configs.sort(key=lambda config: (-config.tom_hit_count, config.key))
+        for config in tom_configs:
+            if not self._can_place_tom_slot(slot, config.key, bar_hits):
+                continue
+            self._add_hit(bar, config, slot, HIT_MAIN, rng, bar_hits, hit_priority=0.76)
+            return True
+        return False
+
+    def _try_fill_slot_with_open_hat(
+        self,
+        bar: DrumBar,
+        slot: int,
+        config: InstrumentConfig,
+        rng: random.Random,
+        bar_hits: dict[str, set[int]],
+    ) -> bool:
+        if not config.enabled:
+            return False
+        if slot in bar_hits.get("kick", set()) or slot in bar_hits.get("snare", set()):
+            return False
+        if slot in bar_hits.get("hihat_closed", set()):
+            existing = self._find_hit(bar, "hihat_closed", slot)
+            if existing is not None:
+                self._remove_hit(bar, existing, bar_hits)
+        self._add_hit(bar, config, slot, HIT_MAIN, rng, bar_hits, hit_priority=0.78)
+        return True
+
+    def _try_fill_slot_with_kick(
+        self,
+        bar: DrumBar,
+        slot: int,
+        config: InstrumentConfig,
+        rng: random.Random,
+        bar_hits: dict[str, set[int]],
+    ) -> bool:
+        if not config.enabled:
+            return False
+        if slot in bar_hits.get("snare", set()):
+            return False
+        self._add_hit(bar, config, slot, HIT_MAIN, rng, bar_hits, hit_priority=0.8)
+        return True
 
     def _shape_fill_kick(
         self,
