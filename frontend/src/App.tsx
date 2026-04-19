@@ -2049,104 +2049,110 @@ function App() {
 
               <div className="action-group">
                 <div className="playback-actions">
-                  <button
-                    type="submit"
-                    disabled={
-                      isLoadingPresets ||
-                      isGeneratingPattern ||
-                      isGenerating ||
-                      isGeneratingGhosts ||
-                      isEditingPattern ||
-                      !selectedPreset ||
-                      Boolean(currentGroupingError) ||
-                      Boolean(kickVelocityError) ||
-                      Boolean(snareVelocityError) ||
-                      Boolean(hihatClosedVelocityError) ||
-                      Boolean(rideVelocityError) ||
-                      Boolean(hihatOpenVelocityError) ||
-                      Boolean(crashVelocityError) ||
-                      Boolean(tomsVelocityError)
-                    }
-                  >
-                    {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
-                  </button>
+                  <div className="playback-actions-row playback-actions-row-primary">
+                    <button
+                      type="submit"
+                      disabled={
+                        isLoadingPresets ||
+                        isGeneratingPattern ||
+                        isGenerating ||
+                        isGeneratingGhosts ||
+                        isEditingPattern ||
+                        !selectedPreset ||
+                        Boolean(currentGroupingError) ||
+                        Boolean(kickVelocityError) ||
+                        Boolean(snareVelocityError) ||
+                        Boolean(hihatClosedVelocityError) ||
+                        Boolean(rideVelocityError) ||
+                        Boolean(hihatOpenVelocityError) ||
+                        Boolean(crashVelocityError) ||
+                        Boolean(tomsVelocityError)
+                      }
+                    >
+                      {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
+                    </button>
 
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={handleClearPattern}
-                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                  >
-                    Clear
-                  </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => void handleGenerateGhosts()}
+                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                    >
+                      {isGeneratingGhosts ? "Generating Ghosts..." : "Generate Ghosts"}
+                    </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={handleRandomizeParameters}
-                    disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                  >
-                    Randomize
-                  </button>
+                  <div className="playback-actions-row playback-actions-row-secondary">
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={handleClearPattern}
+                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                    >
+                      Clear
+                    </button>
 
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => void handleGenerateGhosts()}
-                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                  >
-                    {isGeneratingGhosts ? "Generating Ghosts..." : "Generate Ghosts"}
-                  </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={handleRandomizeParameters}
+                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                    >
+                      Randomize
+                    </button>
 
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => void handleDownloadMidi()}
-                    disabled={
-                      isLoadingPresets ||
-                      isGeneratingPattern ||
-                      isGenerating ||
-                      isGeneratingGhosts ||
-                      isEditingPattern ||
-                      !selectedPreset ||
-                      Boolean(currentGroupingError) ||
-                      Boolean(kickVelocityError) ||
-                      Boolean(snareVelocityError) ||
-                      Boolean(hihatClosedVelocityError) ||
-                      Boolean(rideVelocityError) ||
-                      Boolean(hihatOpenVelocityError) ||
-                      Boolean(crashVelocityError) ||
-                      Boolean(tomsVelocityError)
-                    }
-                  >
-                    {isGenerating ? "Downloading MIDI..." : pattern ? "Download Edited MIDI" : "Download MIDI"}
-                  </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => void handleDownloadMidi()}
+                      disabled={
+                        isLoadingPresets ||
+                        isGeneratingPattern ||
+                        isGenerating ||
+                        isGeneratingGhosts ||
+                        isEditingPattern ||
+                        !selectedPreset ||
+                        Boolean(currentGroupingError) ||
+                        Boolean(kickVelocityError) ||
+                        Boolean(snareVelocityError) ||
+                        Boolean(hihatClosedVelocityError) ||
+                        Boolean(rideVelocityError) ||
+                        Boolean(hihatOpenVelocityError) ||
+                        Boolean(crashVelocityError) ||
+                        Boolean(tomsVelocityError)
+                      }
+                    >
+                      {isGenerating ? "Downloading MIDI..." : pattern ? "Download Edited MIDI" : "Download MIDI"}
+                    </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => void handlePlay()}
-                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                  >
-                    Play
-                  </button>
+                  <div className="playback-actions-row playback-actions-row-transport">
+                    <button
+                      type="button"
+                      onClick={() => void handlePlay()}
+                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                    >
+                      Play
+                    </button>
 
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={handleStop}
-                    disabled={playbackStatus !== "Playing"}
-                  >
-                    Stop
-                  </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={handleStop}
+                      disabled={playbackStatus !== "Playing"}
+                    >
+                      Stop
+                    </button>
 
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={() => void handleRestart()}
-                    disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                  >
-                    Restart
-                  </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={() => void handleRestart()}
+                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                    >
+                      Restart
+                    </button>
+                  </div>
                 </div>
 
                 <div className="toggle-row">
@@ -2178,7 +2184,7 @@ function App() {
                   </label>
                 </div>
 
-                <p className="message">Playback: {playbackStatus}</p>
+                <p className="message playback-status">Playback: {playbackStatus}</p>
               </div>
             </section>
           </div>
@@ -2191,14 +2197,14 @@ function App() {
           </div>
 
           <div className="instrument-bands">
+            <div className="backbone-cluster">
             <section className="band-card band-card-backbone">
               <div className="band-header">
                 <h3>Backbone</h3>
                 <p>Kick and snare define the structural weight of the groove.</p>
               </div>
 
-              <div className="band-grid band-grid-2">
-              <div className="backbone-column backbone-column-kick">
+              <div className="band-grid band-grid-backbone">
               <section className="instrument-card instrument-card-kick">
                 <div className="instrument-head">
                   <h3>Kick</h3>
@@ -2279,37 +2285,6 @@ function App() {
                   </div>
                 </div>
               </section>
-
-              <section className="instrument-card instrument-card-preset">
-                <div className="instrument-head">
-                  <h3>Preset</h3>
-                  <p>Load a saved starting point without changing the generation workflow.</p>
-                </div>
-
-                <div className="instrument-body instrument-body-preset">
-                  <label className="field">
-                    <select
-                      value={selectedPreset}
-                      onChange={(event) => handlePresetChange(event.target.value)}
-                      disabled={isLoadingPresets}
-                    >
-                      <option value={CUSTOM_PRESET_ID}>Custom</option>
-                      {isLoadingPresets ? (
-                        <option>Loading presets...</option>
-                      ) : presets.length > 0 ? (
-                        presets.map((preset) => (
-                          <option key={preset.id} value={preset.id}>
-                            {preset.label}
-                          </option>
-                        ))
-                      ) : (
-                        <option>No presets available</option>
-                      )}
-                    </select>
-                  </label>
-                </div>
-              </section>
-              </div>
 
               <section className="instrument-card instrument-card-snare">
                 <div className="instrument-head">
@@ -2452,6 +2427,37 @@ function App() {
               </section>
               </div>
             </section>
+
+            <section className="instrument-card instrument-card-preset preset-floating-card">
+              <div className="instrument-head">
+                <h3>Preset</h3>
+                <p>Load a saved starting point without changing the generation workflow.</p>
+              </div>
+
+              <div className="instrument-body instrument-body-preset">
+                <label className="field">
+                  <select
+                    value={selectedPreset}
+                    onChange={(event) => handlePresetChange(event.target.value)}
+                    disabled={isLoadingPresets}
+                  >
+                    <option value={CUSTOM_PRESET_ID}>Custom</option>
+                    {isLoadingPresets ? (
+                      <option>Loading presets...</option>
+                    ) : presets.length > 0 ? (
+                      presets.map((preset) => (
+                        <option key={preset.id} value={preset.id}>
+                          {preset.label}
+                        </option>
+                      ))
+                    ) : (
+                      <option>No presets available</option>
+                    )}
+                  </select>
+                </label>
+              </div>
+            </section>
+            </div>
 
             <section className="band-card band-card-pulse">
               <div className="band-header">
