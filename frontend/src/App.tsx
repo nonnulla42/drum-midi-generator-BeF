@@ -800,6 +800,12 @@ type TimingFeelControlProps = {
   value: (typeof TIMING_FEEL_OPTIONS)[number]["value"];
   onChange: (value: (typeof TIMING_FEEL_OPTIONS)[number]["value"]) => void;
   ariaLabel?: string;
+  className?: string;
+  options?: readonly {
+    value: (typeof TIMING_FEEL_OPTIONS)[number]["value"];
+    label: string;
+    shape: string;
+  }[];
 };
 
 const TIMING_FEEL_VISUAL_OPTIONS = [
@@ -809,15 +815,21 @@ const TIMING_FEEL_VISUAL_OPTIONS = [
   { value: "random", label: "Random", shape: "center random" },
 ] as const;
 
-function TimingFeelControl({ value, onChange, ariaLabel = "Timing feel" }: TimingFeelControlProps) {
+function TimingFeelControl({
+  value,
+  onChange,
+  ariaLabel = "Timing feel",
+  className = "",
+  options = TIMING_FEEL_VISUAL_OPTIONS,
+}: TimingFeelControlProps) {
   return (
     <div className="field">
       <div className="plugin-control-head">
         <span>Timing Feel</span>
       </div>
 
-      <div className="timing-feel-control" role="group" aria-label={ariaLabel}>
-        {TIMING_FEEL_VISUAL_OPTIONS.map((option) => {
+      <div className={className ? `timing-feel-control ${className}` : "timing-feel-control"} role="group" aria-label={ariaLabel}>
+        {options.map((option) => {
           const isActive = option.value === value;
 
           return (
@@ -2229,6 +2241,13 @@ function App() {
                     <div className="kick-top-cell kick-top-cell-timing">
                       <TimingFeelControl
                         value={kickTimingFeel}
+                        className="timing-feel-control-vertical"
+                        options={[
+                          { value: "push", label: "Push", shape: "center" },
+                          { value: "neutral", label: "Neutral", shape: "center" },
+                          { value: "drag", label: "Drag", shape: "center" },
+                          { value: "random", label: "Random", shape: "center random" },
+                        ]}
                         onChange={(nextValue) => {
                           switchToCustomIfNeeded();
                           setKickTimingFeel(nextValue);
@@ -2249,19 +2268,21 @@ function App() {
                     />
                   </div>
 
-                  <VelocityRangeControl
-                    label="Velocity"
-                    min={1}
-                    max={127}
-                    step={1}
-                    minValue={kickVelocityMin}
-                    maxValue={kickVelocityMax}
-                    onChange={(nextMin, nextMax) => {
-                      switchToCustomIfNeeded();
-                      setKickVelocityMin(nextMin);
-                      setKickVelocityMax(nextMax);
-                    }}
-                  />
+                  <div className="kick-velocity-control">
+                    <VelocityRangeControl
+                      label="Velocity"
+                      min={1}
+                      max={127}
+                      step={1}
+                      minValue={kickVelocityMin}
+                      maxValue={kickVelocityMax}
+                      onChange={(nextMin, nextMax) => {
+                        switchToCustomIfNeeded();
+                        setKickVelocityMin(nextMin);
+                        setKickVelocityMax(nextMax);
+                      }}
+                    />
+                  </div>
                 </div>
               </section>
 
@@ -2302,6 +2323,13 @@ function App() {
                       <TimingFeelControl
                         value={snareTimingFeel}
                         ariaLabel="Snare timing feel"
+                        className="timing-feel-control-vertical"
+                        options={[
+                          { value: "push", label: "Push", shape: "center" },
+                          { value: "neutral", label: "Neutral", shape: "center" },
+                          { value: "drag", label: "Drag", shape: "center" },
+                          { value: "random", label: "Random", shape: "center random" },
+                        ]}
                         onChange={(nextValue) => {
                           switchToCustomIfNeeded();
                           setSnareTimingFeel(nextValue);
@@ -2322,19 +2350,21 @@ function App() {
                     />
                   </div>
 
-                  <VelocityRangeControl
-                    label="Velocity"
-                    min={1}
-                    max={127}
-                    step={1}
-                    minValue={snareVelocityMin}
-                    maxValue={snareVelocityMax}
-                    onChange={(nextMin, nextMax) => {
-                      switchToCustomIfNeeded();
-                      setSnareVelocityMin(nextMin);
-                      setSnareVelocityMax(nextMax);
-                    }}
-                  />
+                  <div className="snare-velocity-control">
+                    <VelocityRangeControl
+                      label="Velocity"
+                      min={1}
+                      max={127}
+                      step={1}
+                      minValue={snareVelocityMin}
+                      maxValue={snareVelocityMax}
+                      onChange={(nextMin, nextMax) => {
+                        switchToCustomIfNeeded();
+                        setSnareVelocityMin(nextMin);
+                        setSnareVelocityMax(nextMax);
+                      }}
+                    />
+                  </div>
 
                   <div className="snare-ghost-section">
                     <div className="snare-ghost-head">
