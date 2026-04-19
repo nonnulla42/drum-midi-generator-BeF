@@ -1235,6 +1235,71 @@ button:disabled {
   font-size: 0.68rem;
 }
 
+.fill-step-controls {
+  display: grid;
+  gap: 18px;
+  align-content: start;
+  justify-items: center;
+}
+
+.fill-step-control {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  transform: translateX(1px);
+}
+
+.fill-step-control .field {
+  width: 100%;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 8px;
+  justify-items: center;
+}
+
+.fill-step-control .plugin-control-head {
+  order: 2;
+  width: calc(100% - 18px);
+  justify-content: center;
+}
+
+.fill-step-control .plugin-control-head span {
+  transform: translateY(0px);
+}
+
+.fill-step-control .handle-option-slider {
+  order: 1;
+  width: calc(100% - 18px);
+  padding: 4px 0 0px;
+}
+
+.fill-step-control .handle-option-slider-track {
+  height: 10px;
+}
+
+.fill-step-control .handle-option-slider-fill {
+  height: 4px;
+}
+
+.fill-step-control .handle-option-slider-tick {
+  width: 8px;
+  height: 8px;
+}
+
+.fill-step-control .handle-option-slider-handle {
+  min-width: 30px;
+  height: 16px;
+  padding: 0 2px;
+}
+
+.fill-step-control .handle-option-slider-handle span {
+  font-size: 0.64rem;
+}
+
+.instrument-card-fill .field-muted {
+  opacity: 0.58;
+}
+
 .instrument-head {
   display: flex;
   align-items: center;

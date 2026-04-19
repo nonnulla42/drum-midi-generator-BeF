@@ -123,6 +123,26 @@ const TOMS_HIT_OPTIONS = [
   { value: "3", label: "3" },
 ] as const;
 
+const FILL_INTENSITY_OPTIONS = [
+  { value: "off", label: "Off" },
+  { value: "low", label: "Low" },
+  { value: "medium", label: "Mid" },
+  { value: "high", label: "High" },
+] as const;
+
+const FILL_LENGTH_OPTIONS = [
+  { value: "short", label: "Short" },
+  { value: "medium", label: "Mid" },
+  { value: "long", label: "Long" },
+] as const;
+
+const FILL_EVERY_OPTIONS = [
+  { value: "1", label: "1" },
+  { value: "2", label: "2" },
+  { value: "4", label: "4" },
+  { value: "8", label: "8" },
+] as const;
+
 const GHOST_PLACEMENT_OPTIONS = [
   { value: "before", label: "Before" },
   { value: "after", label: "After" },
@@ -538,9 +558,11 @@ function SteppedSliderControl({ label, value, options, onChange }: SteppedSlider
 type HandleOptionSliderControlProps = {
   label: string;
   value: string;
-  options: readonly { value: string; label: string }[];
+  options: readonly { value: string; label: string; slot?: number }[];
   onChange: (value: string) => void;
   orientation?: "horizontal" | "vertical";
+  slotCount?: number;
+  disabled?: boolean;
 };
 
 function HandleOptionSliderControl({
@@ -549,12 +571,36 @@ function HandleOptionSliderControl({
   options,
   onChange,
   orientation = "horizontal",
+  slotCount,
+  disabled = false,
 }: HandleOptionSliderControlProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
   const activeIndex = Math.max(0, options.findIndex((option) => option.value === value));
   const activeOption = options[activeIndex] ?? options[0];
-  const handlePercent = options.length > 1 ? (activeIndex / (options.length - 1)) * 100 : 0;
+  const totalSlots = Math.max(slotCount ?? options.length, 1);
+
+  function optionSlot(option: (typeof options)[number], index: number): number {
+    return Math.min(Math.max(option.slot ?? index, 0), totalSlots - 1);
+  }
+
+  const activeSlot = optionSlot(activeOption, activeIndex);
+  const handlePercent = totalSlots > 1 ? (activeSlot / (totalSlots - 1)) * 100 : 0;
+
+  function nearestOptionBySlot(slotValue: number): string {
+    let nearest = activeOption;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    options.forEach((option, index) => {
+      const distance = Math.abs(optionSlot(option, index) - slotValue);
+      if (distance < nearestDistance) {
+        nearest = option;
+        nearestDistance = distance;
+      }
+    });
+
+    return nearest.value;
+  }
 
   function valueFromClientX(clientX: number): string {
     const track = trackRef.current;
@@ -564,8 +610,8 @@ function HandleOptionSliderControl({
 
     const rect = track.getBoundingClientRect();
     const ratio = clampValue((clientX - rect.left) / rect.width, 0, 1);
-    const index = Math.round(ratio * (options.length - 1));
-    return options[index]?.value ?? activeOption.value;
+    const slotValue = Math.round(ratio * (totalSlots - 1));
+    return nearestOptionBySlot(slotValue);
   }
 
   function valueFromClientY(clientY: number): string {
@@ -576,15 +622,21 @@ function HandleOptionSliderControl({
 
     const rect = track.getBoundingClientRect();
     const ratio = clampValue((rect.bottom - clientY) / rect.height, 0, 1);
-    const index = Math.round(ratio * (options.length - 1));
-    return options[index]?.value ?? activeOption.value;
+    const slotValue = Math.round(ratio * (totalSlots - 1));
+    return nearestOptionBySlot(slotValue);
   }
 
   function commitFromPointer(clientX: number, clientY: number) {
+    if (disabled) {
+      return;
+    }
     onChange(orientation === "vertical" ? valueFromClientY(clientY) : valueFromClientX(clientX));
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (disabled) {
+      return;
+    }
     dragPointerIdRef.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
     commitFromPointer(event.clientX, event.clientY);
@@ -606,6 +658,10 @@ function HandleOptionSliderControl({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (disabled) {
+      return;
+    }
+
     if (event.key === "ArrowRight" || event.key === "ArrowUp") {
       event.preventDefault();
       onChange(options[Math.min(activeIndex + 1, options.length - 1)]?.value ?? activeOption.value);
@@ -640,12 +696,13 @@ function HandleOptionSliderControl({
         ref={trackRef}
         className={orientation === "vertical" ? "handle-option-slider handle-option-slider-vertical" : "handle-option-slider"}
         role="slider"
-        tabIndex={0}
+        tabIndex={disabled ? -1 : 0}
         aria-label={label}
         aria-valuemin={0}
-        aria-valuemax={Math.max(options.length - 1, 0)}
-        aria-valuenow={activeIndex}
+        aria-valuemax={Math.max(totalSlots - 1, 0)}
+        aria-valuenow={activeSlot}
         aria-valuetext={activeOption.label}
+        aria-disabled={disabled}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -661,7 +718,7 @@ function HandleOptionSliderControl({
             style={orientation === "vertical" ? { height: `${handlePercent}%` } : { width: `${handlePercent}%` }}
           />
           {options.map((option, index) => {
-            const tickPercent = options.length > 1 ? (index / (options.length - 1)) * 100 : 0;
+            const tickPercent = totalSlots > 1 ? (optionSlot(option, index) / (totalSlots - 1)) * 100 : 0;
 
             return (
               <button
@@ -671,7 +728,11 @@ function HandleOptionSliderControl({
                 style={orientation === "vertical" ? { bottom: `${tickPercent}%` } : { left: `${tickPercent}%` }}
                 aria-label={option.label}
                 aria-pressed={option.value === activeOption.value}
+                disabled={disabled}
                 onClick={(event) => {
+                  if (disabled) {
+                    return;
+                  }
                   event.stopPropagation();
                   onChange(option.value);
                 }}
@@ -2854,58 +2915,48 @@ function App() {
                 </div>
 
                 <div className="instrument-body">
-                  <label className="field">
-                    <span>Intensity</span>
-                    <select
-                      value={fillIntensity}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setFillIntensity(event.target.value as "off" | "low" | "medium" | "high");
-                      }}
-                    >
-                      {["off", "low", "medium", "high"].map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="fill-step-controls">
+                    <div className="fill-step-control">
+                      <HandleOptionSliderControl
+                        label="Intensity"
+                        value={fillIntensity}
+                        options={FILL_INTENSITY_OPTIONS}
+                        slotCount={4}
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setFillIntensity(nextValue as "off" | "low" | "medium" | "high");
+                        }}
+                      />
+                    </div>
 
-                  <label className={`field ${fillIntensity === "off" ? "field-muted" : ""}`}>
-                    <span>Length</span>
-                    <select
-                      value={fillLength}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setFillLength(event.target.value as "short" | "medium" | "long");
-                      }}
-                      disabled={fillIntensity === "off"}
-                    >
-                      {["short", "medium", "long"].map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <div className={`fill-step-control ${fillIntensity === "off" ? "field-muted" : ""}`}>
+                      <HandleOptionSliderControl
+                        label="Length"
+                        value={fillLength}
+                        options={FILL_LENGTH_OPTIONS}
+                        slotCount={3}
+                        disabled={fillIntensity === "off"}
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setFillLength(nextValue as "short" | "medium" | "long");
+                        }}
+                      />
+                    </div>
 
-                  <label className={`field ${fillIntensity === "off" ? "field-muted" : ""}`}>
-                    <span>Every</span>
-                    <select
-                      value={fillEvery}
-                      onChange={(event) => {
-                        switchToCustomIfNeeded();
-                        setFillEvery(Number(event.target.value));
-                      }}
-                      disabled={fillIntensity === "off"}
-                    >
-                      {[1, 2, 4, 8].map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    <div className={`fill-step-control ${fillIntensity === "off" ? "field-muted" : ""}`}>
+                      <HandleOptionSliderControl
+                        label="Every"
+                        value={String(fillEvery)}
+                        options={FILL_EVERY_OPTIONS}
+                        slotCount={4}
+                        disabled={fillIntensity === "off"}
+                        onChange={(nextValue) => {
+                          switchToCustomIfNeeded();
+                          setFillEvery(Number(nextValue));
+                        }}
+                      />
+                    </div>
+                  </div>
                 </div>
               </section>
               </div>
