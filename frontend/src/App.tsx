@@ -143,6 +143,13 @@ const FILL_EVERY_OPTIONS = [
   { value: "8", label: "8" },
 ] as const;
 
+const PATTERN_LENGTH_OPTIONS = [
+  { value: "1", label: "1" },
+  { value: "2", label: "2" },
+  { value: "4", label: "4" },
+  { value: "8", label: "8" },
+] as const;
+
 const GHOST_PLACEMENT_OPTIONS = [
   { value: "before", label: "Before" },
   { value: "after", label: "After" },
@@ -563,6 +570,7 @@ type HandleOptionSliderControlProps = {
   orientation?: "horizontal" | "vertical";
   slotCount?: number;
   disabled?: boolean;
+  showValueInHandle?: boolean;
 };
 
 function HandleOptionSliderControl({
@@ -573,6 +581,7 @@ function HandleOptionSliderControl({
   orientation = "horizontal",
   slotCount,
   disabled = false,
+  showValueInHandle = false,
 }: HandleOptionSliderControlProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
@@ -743,7 +752,7 @@ function HandleOptionSliderControl({
             className={orientation === "vertical" ? "handle-option-slider-handle handle-option-slider-handle-vertical" : "handle-option-slider-handle"}
             style={orientation === "vertical" ? { bottom: `${handlePercent}%` } : { left: `${handlePercent}%` }}
           >
-            <span>{activeOption.label}</span>
+            <span>{showValueInHandle ? activeOption.value : activeOption.label}</span>
           </div>
         </div>
       </div>
@@ -758,9 +767,18 @@ type ContinuousSliderControlProps = {
   max: number;
   step: number;
   onChange: (value: number) => void;
+  showValueInHandle?: boolean;
 };
 
-function ContinuousSliderControl({ label, value, min, max, step, onChange }: ContinuousSliderControlProps) {
+function ContinuousSliderControl({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+  showValueInHandle = false,
+}: ContinuousSliderControlProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
   const percent = max > min ? ((value - min) / (max - min)) * 100 : 0;
@@ -831,9 +849,11 @@ function ContinuousSliderControl({ label, value, min, max, step, onChange }: Con
     <div className="field">
       <div className="plugin-control-head">
         <span>{label}</span>
-        <output className="plugin-control-readout">
-          <span className="plugin-control-readout-index">{formatKnobValue(value)}</span>
-        </output>
+        {showValueInHandle ? null : (
+          <output className="plugin-control-readout">
+            <span className="plugin-control-readout-index">{formatKnobValue(value)}</span>
+          </output>
+        )}
       </div>
 
       <div
@@ -857,7 +877,9 @@ function ContinuousSliderControl({ label, value, min, max, step, onChange }: Con
       >
         <div className="continuous-slider-track">
           <div className="continuous-slider-fill" style={{ width: `${percent}%` }} />
-          <div className="continuous-slider-handle" style={{ left: `${percent}%` }} />
+          <div className={showValueInHandle ? "continuous-slider-handle continuous-slider-handle-valued" : "continuous-slider-handle"} style={{ left: `${percent}%` }}>
+            {showValueInHandle ? <span>{Math.round(value)}</span> : null}
+          </div>
         </div>
       </div>
     </div>
@@ -1878,53 +1900,49 @@ function App() {
                 <p>Define meter, grouping, preset, and overall form before shaping individual instruments.</p>
               </div>
 
-              <label className="field">
-                <span>BPM</span>
-                <input
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={bpm}
-                  onChange={(event) => {
-                    setBpm(Number(event.target.value));
-                  }}
-                />
-              </label>
+              <ContinuousSliderControl
+                label="BPM"
+                value={bpm}
+                min={40}
+                max={220}
+                step={1}
+                showValueInHandle
+                onChange={(nextValue) => {
+                  setBpm(nextValue);
+                }}
+              />
 
-              <label className="field">
-                <span>Pattern Length</span>
-                <select
-                  value={bars}
-                  onChange={(event) => {
-                    switchToCustomIfNeeded();
-                    setBars(Number(event.target.value));
-                  }}
-                >
-                  {[1, 2, 4, 8].map((value) => (
-                    <option key={value} value={value}>
-                      {value}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <HandleOptionSliderControl
+                label="Pattern Length"
+                value={String(bars)}
+                options={PATTERN_LENGTH_OPTIONS}
+                slotCount={4}
+                showValueInHandle
+                onChange={(nextValue) => {
+                  switchToCustomIfNeeded();
+                  setBars(Number(nextValue));
+                }}
+              />
 
-              <label className="field">
-                <span>Beat Grouping</span>
-                <input
-                  type="text"
-                  value={grouping}
-                  onChange={(event) => {
-                    switchToCustomIfNeeded();
-                    setGrouping(event.target.value);
-                  }}
-                  placeholder="4 or 3+2"
-                />
-              </label>
+              <div className="structure-grouping-row">
+                <label className="field structure-grouping-field">
+                  <span>Beat Grouping</span>
+                  <input
+                    type="text"
+                    value={grouping}
+                    onChange={(event) => {
+                      switchToCustomIfNeeded();
+                      setGrouping(event.target.value);
+                    }}
+                    placeholder="4 or 3+2"
+                  />
+                </label>
 
-              <label className="field">
-                <span>Time Signature</span>
-                <input type="text" value={timeSignature} readOnly />
-              </label>
+                <label className="field structure-time-signature-field">
+                  <span>Time Signature</span>
+                  <input type="text" value={timeSignature} readOnly />
+                </label>
+              </div>
 
               <label className="field">
                 <span>Seed</span>
@@ -1953,94 +1971,63 @@ function App() {
                 <p>Shape feel and repetition without changing the core groove logic.</p>
               </div>
 
-              <label className="field">
-                <span>Swing</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={0.65}
-                  step={0.01}
-                  value={swing}
-                  onChange={(event) => {
-                    switchToCustomIfNeeded();
-                    setSwing(Number(event.target.value));
-                  }}
-                />
-              </label>
+              <div className="humanization-knob-grid">
+                <div className="humanization-knob-control">
+                  <KnobControl
+                    label="Humanize Timing"
+                    min={0}
+                    max={24}
+                    step={1}
+                    value={humanizeTiming}
+                    onChange={(nextValue) => {
+                      switchToCustomIfNeeded();
+                      setHumanizeTiming(nextValue);
+                    }}
+                  />
+                </div>
 
-              <label className="field">
-                <span>Humanize Timing</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={24}
-                  step={1}
-                  value={humanizeTiming}
-                  onChange={(event) => {
-                    switchToCustomIfNeeded();
-                    setHumanizeTiming(Number(event.target.value));
-                  }}
-                />
-              </label>
+                <div className="humanization-knob-control">
+                  <KnobControl
+                    label="Humanize Velocity"
+                    min={0}
+                    max={24}
+                    step={1}
+                    value={humanizeVelocity}
+                    onChange={(nextValue) => {
+                      switchToCustomIfNeeded();
+                      setHumanizeVelocity(nextValue);
+                    }}
+                  />
+                </div>
 
-              <label className="field">
-                <span>Humanize Velocity</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={24}
-                  step={1}
-                  value={humanizeVelocity}
-                  onChange={(event) => {
-                    switchToCustomIfNeeded();
-                    setHumanizeVelocity(Number(event.target.value));
-                  }}
-                />
-              </label>
+                <div className="humanization-knob-control">
+                  <KnobControl
+                    label="Swing"
+                    min={0}
+                    max={0.65}
+                    step={0.01}
+                    value={swing}
+                    onChange={(nextValue) => {
+                      switchToCustomIfNeeded();
+                      setSwing(nextValue);
+                    }}
+                  />
+                </div>
 
-              <label className="field">
-                <span>Bar Similarity</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={barSimilarity}
-                  onChange={(event) => {
-                    switchToCustomIfNeeded();
-                    setBarSimilarity(Number(event.target.value));
-                  }}
-                />
-              </label>
-            </section>
-
-            <section className="section-card">
-              <div className="section-card-head">
-                <h2>Preset</h2>
-                <p>Load a saved starting point without changing the generation or editing workflow.</p>
+                <div className="humanization-knob-control">
+                  <KnobControl
+                    label="Bar Similarity"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={barSimilarity}
+                    onChange={(nextValue) => {
+                      switchToCustomIfNeeded();
+                      setBarSimilarity(nextValue);
+                    }}
+                  />
+                </div>
               </div>
-
-              <label className="field">
-                <span>Preset</span>
-                <select
-                  value={selectedPreset}
-                  onChange={(event) => handlePresetChange(event.target.value)}
-                  disabled={isLoadingPresets}
-                >
-                  <option value={CUSTOM_PRESET_ID}>Custom</option>
-                  {isLoadingPresets ? (
-                    <option>Loading presets...</option>
-                  ) : presets.length > 0 ? (
-                    presets.map((preset) => (
-                      <option key={preset.id} value={preset.id}>
-                        {preset.label}
-                      </option>
-                    ))
-                  ) : (
-                    <option>No presets available</option>
-                  )}
-                </select>
-              </label>
             </section>
 
             <section className="section-card section-card-status">
@@ -2211,6 +2198,7 @@ function App() {
               </div>
 
               <div className="band-grid band-grid-2">
+              <div className="backbone-column backbone-column-kick">
               <section className="instrument-card instrument-card-kick">
                 <div className="instrument-head">
                   <h3>Kick</h3>
@@ -2291,6 +2279,37 @@ function App() {
                   </div>
                 </div>
               </section>
+
+              <section className="instrument-card instrument-card-preset">
+                <div className="instrument-head">
+                  <h3>Preset</h3>
+                  <p>Load a saved starting point without changing the generation workflow.</p>
+                </div>
+
+                <div className="instrument-body instrument-body-preset">
+                  <label className="field">
+                    <select
+                      value={selectedPreset}
+                      onChange={(event) => handlePresetChange(event.target.value)}
+                      disabled={isLoadingPresets}
+                    >
+                      <option value={CUSTOM_PRESET_ID}>Custom</option>
+                      {isLoadingPresets ? (
+                        <option>Loading presets...</option>
+                      ) : presets.length > 0 ? (
+                        presets.map((preset) => (
+                          <option key={preset.id} value={preset.id}>
+                            {preset.label}
+                          </option>
+                        ))
+                      ) : (
+                        <option>No presets available</option>
+                      )}
+                    </select>
+                  </label>
+                </div>
+              </section>
+              </div>
 
               <section className="instrument-card instrument-card-snare">
                 <div className="instrument-head">

@@ -147,6 +147,14 @@ summary {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  background:
+    radial-gradient(circle at top left, rgba(127, 220, 155, 0.08), transparent 34%),
+    radial-gradient(circle at top right, rgba(140, 114, 232, 0.1), transparent 38%),
+    linear-gradient(180deg, rgba(18, 26, 38, 0.97) 0%, rgba(10, 15, 24, 0.98) 100%);
+  border-color: rgba(150, 173, 214, 0.2);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 8px 20px rgba(0, 0, 0, 0.22);
 }
 
 .sidebar-form {
@@ -154,7 +162,7 @@ summary {
   overflow: auto;
   padding-right: 4px;
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .hero,
@@ -163,8 +171,14 @@ summary {
 }
 
 .hero {
-  padding-bottom: 10px;
-  border-bottom: 1px solid rgba(150, 173, 214, 0.12);
+  padding: 10px 10px 12px;
+  border: 1px solid rgba(150, 173, 214, 0.14);
+  border-radius: 10px;
+  background:
+    linear-gradient(180deg, rgba(16, 23, 36, 0.96) 0%, rgba(10, 15, 24, 0.98) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 6px 16px rgba(0, 0, 0, 0.14);
 }
 
 .hero h1,
@@ -176,7 +190,9 @@ summary {
 .hero h1 {
   font-size: 1.45rem;
   line-height: 1;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.05em;
+  color: #f0f5ff;
+  text-transform: uppercase;
 }
 
 .hero p,
@@ -191,9 +207,10 @@ summary {
 
 .hero p {
   margin-top: 4px;
-  font-size: 0.84rem;
+  font-size: 0.76rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
+  color: #8eb7d2;
 }
 
 .workspace {
@@ -216,6 +233,42 @@ summary {
 .section-card {
   display: grid;
   gap: 10px;
+  position: relative;
+  padding: 14px 12px 12px;
+  background:
+    linear-gradient(180deg, rgba(15, 22, 33, 0.96) 0%, rgba(10, 15, 24, 0.98) 100%);
+  border-color: rgba(146, 169, 208, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.02),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.01);
+}
+
+.sidebar .section-card::before {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(127, 220, 155, 0.78) 0%, rgba(164, 140, 255, 0.78) 100%);
+  opacity: 0.72;
+}
+
+.sidebar .section-card:nth-of-type(1)::before {
+  background: linear-gradient(90deg, rgba(127, 220, 155, 0.88) 0%, rgba(125, 186, 255, 0.76) 100%);
+}
+
+.sidebar .section-card:nth-of-type(2)::before {
+  background: linear-gradient(90deg, rgba(125, 186, 255, 0.88) 0%, rgba(164, 140, 255, 0.72) 100%);
+}
+
+.sidebar .section-card:nth-of-type(3)::before {
+  background: linear-gradient(90deg, rgba(164, 140, 255, 0.86) 0%, rgba(215, 174, 255, 0.72) 100%);
+}
+
+.sidebar .section-card.section-card-status::before {
+  background: linear-gradient(90deg, rgba(127, 220, 155, 0.82) 0%, rgba(164, 140, 255, 0.82) 100%);
 }
 
 .section-card-head,
@@ -224,6 +277,10 @@ summary {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+.sidebar .section-card-head {
+  padding-bottom: 2px;
 }
 
 .section-card-head h2,
@@ -236,6 +293,11 @@ summary {
   color: #c4b8ff;
 }
 
+.sidebar .section-card-head h2 {
+  color: #eef4ff;
+  letter-spacing: 0.12em;
+}
+
 .section-card-head p,
 .band-header p,
 .instrument-head p,
@@ -245,6 +307,7 @@ summary {
 
 .section-card-status {
   align-content: start;
+  gap: 12px;
 }
 
 .field {
@@ -271,6 +334,149 @@ summary {
   border-radius: var(--control-radius);
   background: rgba(8, 13, 22, 0.88);
   color: #e8f0ff;
+}
+
+.sidebar .field input,
+.sidebar .field select {
+  min-height: 36px;
+  padding: 9px 10px;
+  background:
+    linear-gradient(180deg, rgba(8, 13, 22, 0.94) 0%, rgba(13, 20, 32, 0.98) 100%);
+  border-color: rgba(141, 166, 208, 0.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+.sidebar .continuous-slider {
+  padding: 0;
+}
+
+.sidebar .continuous-slider .plugin-control-head {
+  justify-content: flex-start;
+}
+
+.sidebar .continuous-slider .plugin-control-readout {
+  display: none;
+}
+
+.sidebar .continuous-slider-track {
+  height: 12px;
+}
+
+.sidebar .continuous-slider-fill {
+  height: 4px;
+}
+
+.sidebar .handle-option-slider {
+  padding: 0;
+}
+
+.sidebar .handle-option-slider-track {
+  height: 12px;
+}
+
+.sidebar .handle-option-slider-fill {
+  height: 4px;
+}
+
+.sidebar .handle-option-slider-tick {
+  width: 8px;
+  height: 8px;
+  min-height: 8px;
+  max-height: 8px;
+}
+
+.sidebar .handle-option-slider-handle {
+  min-width: 30px;
+  height: 16px;
+  padding: 0 6px;
+}
+
+.sidebar .handle-option-slider-handle span {
+  font-size: 0.68rem;
+}
+
+.structure-grouping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px;
+  gap: 8px;
+  align-items: end;
+}
+
+.structure-grouping-field,
+.structure-time-signature-field {
+  min-width: 0;
+}
+
+.structure-time-signature-field input {
+  text-align: center;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+.humanization-knob-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 10px;
+}
+
+.humanization-knob-control {
+  display: grid;
+  justify-items: center;
+}
+
+.humanization-knob-control .knob-control {
+  width: 100%;
+  min-height: 112px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+}
+
+.humanization-knob-control .knob {
+  width: 72px;
+  height: 80px;
+}
+
+.humanization-knob-control .knob-face {
+  width: 64px;
+  height: 64px;
+}
+
+.humanization-knob-control .knob-face::before {
+  inset: 6px;
+}
+
+.humanization-knob-control .knob-indicator {
+  top: 7px;
+  height: 21px;
+  transform-origin: 50% 24px;
+}
+
+.humanization-knob-control .knob-value {
+  font-size: 0.82rem;
+}
+
+.humanization-knob-control .knob-control-head {
+  order: 2;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--panel-label-row-height);
+}
+
+.humanization-knob-control .knob-control-head .knob-control-readout {
+  display: none;
+}
+
+.humanization-knob-control .knob-control-head span {
+  text-align: center;
+  line-height: 1;
+  transform: translateY(calc(var(--panel-label-lift) - 2px));
 }
 
 .field input:focus,
@@ -649,6 +855,23 @@ summary {
   pointer-events: none;
 }
 
+.continuous-slider-handle-valued {
+  width: 40px;
+  height: 22px;
+  justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 6px;
+}
+
+.continuous-slider-handle-valued span {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  color: #11203b;
+  white-space: nowrap;
+}
+
 .segmented-control-4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -928,6 +1151,10 @@ summary {
 .message {
   margin: 0;
   font-size: 0.78rem;
+  padding: 8px 9px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 141, 141, 0.18);
+  background: rgba(51, 19, 27, 0.36);
 }
 
 .error {
@@ -945,6 +1172,10 @@ summary {
   gap: 8px;
 }
 
+.sidebar .playback-actions {
+  gap: 9px;
+}
+
 button {
   border: 1px solid transparent;
   border-radius: var(--control-radius);
@@ -954,6 +1185,13 @@ button {
   font-weight: 700;
   cursor: pointer;
   transition: transform 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.sidebar button {
+  min-height: 34px;
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
 }
 
 button:hover:enabled {
@@ -970,6 +1208,11 @@ button:disabled {
   background: rgba(14, 20, 32, 0.92);
   color: #d9e4fa;
   border-color: rgba(136, 159, 200, 0.2);
+}
+
+.sidebar .button-secondary {
+  background: linear-gradient(180deg, rgba(20, 29, 44, 0.96) 0%, rgba(12, 19, 31, 0.98) 100%);
+  border-color: rgba(136, 159, 200, 0.16);
 }
 
 .button-secondary:hover:enabled,
@@ -1037,6 +1280,16 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.backbone-column {
+  min-height: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.backbone-column-kick {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
 .band-grid-3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1058,6 +1311,20 @@ button:disabled {
 .instrument-card-snare {
   overflow-x: hidden;
   overflow-y: hidden;
+}
+
+.instrument-card-kick {
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.instrument-card-preset {
+  overflow: hidden;
+  align-self: end;
+}
+
+.instrument-body-preset {
+  align-content: start;
 }
 
 .instrument-card-compact {
