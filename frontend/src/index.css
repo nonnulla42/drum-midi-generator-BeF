@@ -3173,6 +3173,55 @@ button:disabled {
   flex: 0 1 auto;
 }
 
+.structure-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(4, 9, 17, 0.26);
+}
+
+.structure-confirm-modal {
+  width: min(480px, 100%);
+  padding: 4px 16px 10px;
+  gap: 14px;
+  border-color: rgba(129, 153, 196, 0.18);
+  background:
+    radial-gradient(circle at top left, rgba(104, 240, 154, 0.035), transparent 30%),
+    linear-gradient(180deg, rgba(17, 24, 36, 0.96) 0%, rgba(10, 16, 26, 0.98) 100%);
+  box-shadow:
+    0 14px 32px rgba(0, 0, 0, 0.26),
+    0 0 0 1px rgba(128, 154, 198, 0.05);
+}
+
+.structure-confirm-head {
+  display: grid;
+  gap: 8px;
+}
+
+.structure-confirm-head h2 {
+  margin: 0;
+  font-size: 1.75rem;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.structure-confirm-head p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 2.75;
+  color: var(--text-dim);
+}
+
+.structure-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .pattern-grid-scroll {
   min-height: 0;
   overflow: auto;
@@ -3680,6 +3729,10 @@ button:disabled {
     gap: 10px;
   }
 
+  .structure-confirm-overlay {
+    padding: 18px;
+  }
+
   .pattern-grid {
     gap: 12px;
   }
@@ -3770,6 +3823,11 @@ button:disabled {
 
   .pattern-grid-head-meta {
     flex-wrap: wrap;
+  }
+
+  .structure-confirm-actions {
+    grid-template-columns: 1fr;
+    display: grid;
   }
 
   .pattern-row {

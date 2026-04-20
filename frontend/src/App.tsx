@@ -1554,9 +1554,14 @@ function App() {
   const [generateError, setGenerateError] = useState("");
   const [seedFixedWarningVisible, setSeedFixedWarningVisible] = useState(false);
   const [ghostRerollCount, setGhostRerollCount] = useState(0);
+  const [pendingStructureChange, setPendingStructureChange] = useState<{
+    nextBars: number;
+    nextGroupingRaw: string;
+  } | null>(null);
   const patternPlayerRef = useRef<PatternPlayer | null>(null);
   const lastGenerateSignatureRef = useRef<string | null>(null);
   const seedWarningTimeoutRef = useRef<number | null>(null);
+  const pendingStructureActionRef = useRef<(() => void) | null>(null);
 
   const currentGroupingError = groupingError(groupingInput);
   const kickVelocityError =
@@ -1669,6 +1674,25 @@ function App() {
     }));
   }, [bpm, humanizeTiming, humanizeVelocity, pattern, swing]);
 
+  useEffect(() => {
+    if (!pendingStructureChange) {
+      return;
+    }
+
+    function handleWindowKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cancelPendingStructureChange();
+      }
+    }
+
+    window.addEventListener("keydown", handleWindowKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleWindowKeyDown);
+    };
+  }, [pendingStructureChange, pattern]);
+
   function getPatternPlayer() {
     if (!patternPlayerRef.current) {
       patternPlayerRef.current = new PatternPlayer();
@@ -1697,10 +1721,41 @@ function App() {
     setGenerateError("");
   }
 
-  function applyStructureChange(nextBars: number, nextGroupingRaw: string): boolean {
+  function commitStructureChange(nextBars: number, nextGroupingRaw: string) {
+    const normalizedGrouping = normalizeGrouping(nextGroupingRaw);
+    stopPlaybackStatefully();
+    setBars(nextBars);
+    setGrouping(normalizedGrouping);
+    setGroupingInput(nextGroupingRaw);
+    resetPatternToEmpty(nextBars, normalizedGrouping);
+  }
+
+  function cancelPendingStructureChange() {
+    pendingStructureActionRef.current = null;
+    setPendingStructureChange(null);
+    setBars(pattern.meta.bars);
+    setGrouping(pattern.meta.grouping);
+    setGroupingInput(pattern.meta.grouping);
+  }
+
+  function confirmPendingStructureChange() {
+    if (!pendingStructureChange) {
+      return;
+    }
+
+    const { nextBars, nextGroupingRaw } = pendingStructureChange;
+    const pendingAction = pendingStructureActionRef.current;
+    pendingStructureActionRef.current = null;
+    setPendingStructureChange(null);
+    commitStructureChange(nextBars, nextGroupingRaw);
+    pendingAction?.();
+  }
+
+  function applyStructureChange(nextBars: number, nextGroupingRaw: string, onApplied?: () => void): boolean {
     if (groupingError(nextGroupingRaw)) {
       setBars(nextBars);
       setGroupingInput(nextGroupingRaw);
+      pendingStructureActionRef.current = null;
       return false;
     }
 
@@ -1711,21 +1766,18 @@ function App() {
       setBars(nextBars);
       setGrouping(normalizedGrouping);
       setGroupingInput(nextGroupingRaw);
+      onApplied?.();
       return true;
     }
 
-    if (patternHasEvents(pattern) && !window.confirm("Changing structure will reset the current pattern.")) {
-      setBars(pattern.meta.bars);
-      setGrouping(pattern.meta.grouping);
-      setGroupingInput(pattern.meta.grouping);
+    if (patternHasEvents(pattern)) {
+      pendingStructureActionRef.current = onApplied ?? null;
+      setPendingStructureChange({ nextBars, nextGroupingRaw });
       return false;
     }
 
-    stopPlaybackStatefully();
-    setBars(nextBars);
-    setGrouping(normalizedGrouping);
-    setGroupingInput(nextGroupingRaw);
-    resetPatternToEmpty(nextBars, normalizedGrouping);
+    commitStructureChange(nextBars, nextGroupingRaw);
+    onApplied?.();
     return true;
   }
 
@@ -1749,75 +1801,73 @@ function App() {
   }
 
   function applyPreset(preset: Preset) {
-    if (!applyStructureChange(preset.settings.bars, preset.settings.grouping)) {
-      return;
-    }
-
-    setSelectedPreset(preset.id);
-    setBpm(preset.settings.bpm);
-    setSeed("random");
-    setSwing(preset.settings.swing);
-    setHumanizeTiming(preset.settings.humanize_timing);
-    setHumanizeVelocity(preset.settings.humanize_velocity);
-    setBarSimilarity(preset.settings.bar_similarity);
-    setFillIntensity(preset.settings.fill_intensity);
-    setFillLength(preset.settings.fill_length);
-    setFillEvery(preset.settings.fill_every);
-    setKickEnabled(preset.kick.enabled);
-    setKickDensity(preset.kick.density);
-    setKickSyncopation(preset.kick.syncopation);
-    setKickTimingFeel(preset.kick.timing_feel);
-    setKickVelocityMin(preset.kick.velocity_min);
-    setKickVelocityMax(preset.kick.velocity_max);
-    setSnareEnabled(preset.snare.enabled);
-    setSnareDensity(preset.snare.density);
-    setSnareSyncopation(preset.snare.syncopation);
-    setSnareTimingFeel(preset.snare.timing_feel);
-    setSnareVelocityMin(preset.snare.velocity_min);
-    setSnareVelocityMax(preset.snare.velocity_max);
-    setSnareGhostEnabled(preset.snare.ghost_settings?.enabled ?? DEFAULT_SNARE.ghost.enabled);
-    setSnareGhostDensity(preset.snare.ghost_settings?.density ?? DEFAULT_SNARE.ghost.density);
-    setSnareGhostVelocity(preset.snare.ghost_settings?.velocity ?? DEFAULT_SNARE.ghost.velocity);
-    setSnareGhostPlacement(preset.snare.ghost_settings?.placement ?? DEFAULT_SNARE.ghost.placement);
-    setHihatClosedEnabled(preset.hihat_closed.enabled);
-    setHihatClosedDivision(preset.hihat_closed.division);
-    setHihatClosedSpace(preset.hihat_closed.space);
-    setHihatClosedTimingFeel(preset.hihat_closed.timing_feel);
-    setHihatClosedVelocityMin(preset.hihat_closed.velocity_min);
-    setHihatClosedVelocityMax(preset.hihat_closed.velocity_max);
-    setHihatClosedGhostEnabled(preset.hihat_closed.ghost_settings?.enabled ?? DEFAULT_HIHAT_CLOSED.ghost.enabled);
-    setHihatClosedGhostDensity(preset.hihat_closed.ghost_settings?.density ?? DEFAULT_HIHAT_CLOSED.ghost.density);
-    setHihatClosedGhostVelocity(
-      preset.hihat_closed.ghost_settings?.velocity ?? DEFAULT_HIHAT_CLOSED.ghost.velocity,
-    );
-    setHihatClosedGhostPlacement(
-      preset.hihat_closed.ghost_settings?.placement ?? DEFAULT_HIHAT_CLOSED.ghost.placement,
-    );
-    setRideEnabled(preset.ride.enabled);
-    setRideDivision(preset.ride.division);
-    setRideSpace(preset.ride.space);
-    setRideTimingFeel(preset.ride.timing_feel);
-    setRideVelocityMin(preset.ride.velocity_min);
-    setRideVelocityMax(preset.ride.velocity_max);
-    setRideGhostEnabled(preset.ride.ghost_settings?.enabled ?? DEFAULT_RIDE.ghost.enabled);
-    setRideGhostDensity(preset.ride.ghost_settings?.density ?? DEFAULT_RIDE.ghost.density);
-    setRideGhostVelocity(preset.ride.ghost_settings?.velocity ?? DEFAULT_RIDE.ghost.velocity);
-    setRideGhostPlacement(preset.ride.ghost_settings?.placement ?? DEFAULT_RIDE.ghost.placement);
-    setHihatOpenEnabled(preset.hihat_open.enabled);
-    setHihatOpenDensity(preset.hihat_open.density);
-    setHihatOpenVelocityMin(preset.hihat_open.velocity_min);
-    setHihatOpenVelocityMax(preset.hihat_open.velocity_max);
-    setCrashEnabled(preset.crash.enabled);
-    setCrashDensity(preset.crash.density);
-    setCrashVelocityMin(preset.crash.velocity_min);
-    setCrashVelocityMax(preset.crash.velocity_max);
-    setTomsHighHits(preset.toms.high_hits);
-    setTomsMidHits(preset.toms.mid_hits);
-    setTomsLowHits(preset.toms.low_hits);
-    setTomsVelocityMin(preset.toms.velocity_min);
-    setTomsVelocityMax(preset.toms.velocity_max);
-    stopPlaybackStatefully();
-    setGenerateError("");
+    applyStructureChange(preset.settings.bars, preset.settings.grouping, () => {
+      setSelectedPreset(preset.id);
+      setBpm(preset.settings.bpm);
+      setSeed("random");
+      setSwing(preset.settings.swing);
+      setHumanizeTiming(preset.settings.humanize_timing);
+      setHumanizeVelocity(preset.settings.humanize_velocity);
+      setBarSimilarity(preset.settings.bar_similarity);
+      setFillIntensity(preset.settings.fill_intensity);
+      setFillLength(preset.settings.fill_length);
+      setFillEvery(preset.settings.fill_every);
+      setKickEnabled(preset.kick.enabled);
+      setKickDensity(preset.kick.density);
+      setKickSyncopation(preset.kick.syncopation);
+      setKickTimingFeel(preset.kick.timing_feel);
+      setKickVelocityMin(preset.kick.velocity_min);
+      setKickVelocityMax(preset.kick.velocity_max);
+      setSnareEnabled(preset.snare.enabled);
+      setSnareDensity(preset.snare.density);
+      setSnareSyncopation(preset.snare.syncopation);
+      setSnareTimingFeel(preset.snare.timing_feel);
+      setSnareVelocityMin(preset.snare.velocity_min);
+      setSnareVelocityMax(preset.snare.velocity_max);
+      setSnareGhostEnabled(preset.snare.ghost_settings?.enabled ?? DEFAULT_SNARE.ghost.enabled);
+      setSnareGhostDensity(preset.snare.ghost_settings?.density ?? DEFAULT_SNARE.ghost.density);
+      setSnareGhostVelocity(preset.snare.ghost_settings?.velocity ?? DEFAULT_SNARE.ghost.velocity);
+      setSnareGhostPlacement(preset.snare.ghost_settings?.placement ?? DEFAULT_SNARE.ghost.placement);
+      setHihatClosedEnabled(preset.hihat_closed.enabled);
+      setHihatClosedDivision(preset.hihat_closed.division);
+      setHihatClosedSpace(preset.hihat_closed.space);
+      setHihatClosedTimingFeel(preset.hihat_closed.timing_feel);
+      setHihatClosedVelocityMin(preset.hihat_closed.velocity_min);
+      setHihatClosedVelocityMax(preset.hihat_closed.velocity_max);
+      setHihatClosedGhostEnabled(preset.hihat_closed.ghost_settings?.enabled ?? DEFAULT_HIHAT_CLOSED.ghost.enabled);
+      setHihatClosedGhostDensity(preset.hihat_closed.ghost_settings?.density ?? DEFAULT_HIHAT_CLOSED.ghost.density);
+      setHihatClosedGhostVelocity(
+        preset.hihat_closed.ghost_settings?.velocity ?? DEFAULT_HIHAT_CLOSED.ghost.velocity,
+      );
+      setHihatClosedGhostPlacement(
+        preset.hihat_closed.ghost_settings?.placement ?? DEFAULT_HIHAT_CLOSED.ghost.placement,
+      );
+      setRideEnabled(preset.ride.enabled);
+      setRideDivision(preset.ride.division);
+      setRideSpace(preset.ride.space);
+      setRideTimingFeel(preset.ride.timing_feel);
+      setRideVelocityMin(preset.ride.velocity_min);
+      setRideVelocityMax(preset.ride.velocity_max);
+      setRideGhostEnabled(preset.ride.ghost_settings?.enabled ?? DEFAULT_RIDE.ghost.enabled);
+      setRideGhostDensity(preset.ride.ghost_settings?.density ?? DEFAULT_RIDE.ghost.density);
+      setRideGhostVelocity(preset.ride.ghost_settings?.velocity ?? DEFAULT_RIDE.ghost.velocity);
+      setRideGhostPlacement(preset.ride.ghost_settings?.placement ?? DEFAULT_RIDE.ghost.placement);
+      setHihatOpenEnabled(preset.hihat_open.enabled);
+      setHihatOpenDensity(preset.hihat_open.density);
+      setHihatOpenVelocityMin(preset.hihat_open.velocity_min);
+      setHihatOpenVelocityMax(preset.hihat_open.velocity_max);
+      setCrashEnabled(preset.crash.enabled);
+      setCrashDensity(preset.crash.density);
+      setCrashVelocityMin(preset.crash.velocity_min);
+      setCrashVelocityMax(preset.crash.velocity_max);
+      setTomsHighHits(preset.toms.high_hits);
+      setTomsMidHits(preset.toms.mid_hits);
+      setTomsLowHits(preset.toms.low_hits);
+      setTomsVelocityMin(preset.toms.velocity_min);
+      setTomsVelocityMax(preset.toms.velocity_max);
+      stopPlaybackStatefully();
+      setGenerateError("");
+    });
   }
 
   function handlePresetChange(value: string) {
@@ -2254,46 +2304,44 @@ function App() {
     const nextBars = randomChoice([1, 2, 4, 8]);
     const nextGrouping = randomGroupingValue(rng);
 
-    if (!applyStructureChange(nextBars, nextGrouping)) {
-      return;
-    }
+    applyStructureChange(nextBars, nextGrouping, () => {
+      setSelectedPreset(CUSTOM_PRESET_ID);
+      setGenerateError("");
+      setSwing(randomFloat(0, 0.28));
+      setBarSimilarity(randomFloat(0, 1));
+      setFillEvery(randomChoice([1, 2, 4, 8]));
+      setFillLength(randomChoice(["short", "medium", "long"]));
+      setFillIntensity(randomChoice(["off", "low", "medium", "high"]));
+      setSeed("random");
 
-    setSelectedPreset(CUSTOM_PRESET_ID);
-    setGenerateError("");
-    setSwing(randomFloat(0, 0.28));
-    setBarSimilarity(randomFloat(0, 1));
-    setFillEvery(randomChoice([1, 2, 4, 8]));
-    setFillLength(randomChoice(["short", "medium", "long"]));
-    setFillIntensity(randomChoice(["off", "low", "medium", "high"]));
-    setSeed("random");
+      setKickDensity(randomFloat(0.1, 0.95));
+      setKickSyncopation(randomInt(0, 5));
+      setKickTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
 
-    setKickDensity(randomFloat(0.1, 0.95));
-    setKickSyncopation(randomInt(0, 5));
-    setKickTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+      setSnareDensity(randomFloat(0.1, 0.95));
+      setSnareSyncopation(randomInt(0, 5));
+      setSnareTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+      setSnareGhostDensity(randomFloat(0.05, 0.45));
+      setSnareGhostVelocity(randomInt(22, 42));
 
-    setSnareDensity(randomFloat(0.1, 0.95));
-    setSnareSyncopation(randomInt(0, 5));
-    setSnareTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
-    setSnareGhostDensity(randomFloat(0.05, 0.45));
-    setSnareGhostVelocity(randomInt(22, 42));
+      setHihatClosedDivision(randomChoice(["quarter", "eighth", "sixteenth"]));
+      setHihatClosedSpace(betaLikePulseSpace());
+      setHihatClosedTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+      setHihatClosedGhostDensity(randomFloat(0.05, 0.45));
+      setHihatClosedGhostVelocity(randomInt(22, 42));
 
-    setHihatClosedDivision(randomChoice(["quarter", "eighth", "sixteenth"]));
-    setHihatClosedSpace(betaLikePulseSpace());
-    setHihatClosedTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
-    setHihatClosedGhostDensity(randomFloat(0.05, 0.45));
-    setHihatClosedGhostVelocity(randomInt(22, 42));
+      setRideDivision(randomChoice(["quarter", "eighth", "sixteenth"]));
+      setRideSpace(betaLikePulseSpace());
+      setRideTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
+      setRideGhostDensity(randomFloat(0.05, 0.45));
+      setRideGhostVelocity(randomInt(22, 42));
 
-    setRideDivision(randomChoice(["quarter", "eighth", "sixteenth"]));
-    setRideSpace(betaLikePulseSpace());
-    setRideTimingFeel(randomChoice(["neutral", "push", "drag", "random"]));
-    setRideGhostDensity(randomFloat(0.05, 0.45));
-    setRideGhostVelocity(randomInt(22, 42));
-
-    setHihatOpenDensity(randomFloat(0.05, 0.9));
-    setCrashDensity(randomFloat(0.04, 0.5));
-    setTomsHighHits(randomInt(0, 3));
-    setTomsMidHits(randomInt(0, 3));
-    setTomsLowHits(randomInt(0, 3));
+      setHihatOpenDensity(randomFloat(0.05, 0.9));
+      setCrashDensity(randomFloat(0.04, 0.5));
+      setTomsHighHits(randomInt(0, 3));
+      setTomsMidHits(randomInt(0, 3));
+      setTomsLowHits(randomInt(0, 3));
+    });
   }
 
   return (
@@ -3545,6 +3593,40 @@ function App() {
           </section>
         </section>
       </form>
+      {pendingStructureChange ? (
+        <div
+          className="structure-confirm-overlay"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              cancelPendingStructureChange();
+            }
+          }}
+        >
+          <div
+            className="structure-confirm-modal card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="structure-confirm-title"
+            aria-describedby="structure-confirm-body"
+          >
+            <div className="structure-confirm-head">
+              <h2 id="structure-confirm-title">Reset current pattern?</h2>
+              <p id="structure-confirm-body">
+                Changing pattern length or beat grouping will clear the current grid.
+              </p>
+            </div>
+
+            <div className="structure-confirm-actions">
+              <button type="button" className="button-secondary" onClick={cancelPendingStructureChange}>
+                Cancel
+              </button>
+              <button type="button" onClick={confirmPendingStructureChange}>
+                Reset grid
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 }
