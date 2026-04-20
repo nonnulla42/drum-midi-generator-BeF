@@ -1574,6 +1574,19 @@ function App() {
     crashVelocityMax < crashVelocityMin ? "Crash velocity max must be greater than or equal to min." : "";
   const tomsVelocityError =
     tomsVelocityMax < tomsVelocityMin ? "Toms velocity max must be greater than or equal to min." : "";
+  const inlineErrors = [
+    loadError,
+    currentGroupingError,
+    kickVelocityError,
+    snareVelocityError,
+    hihatClosedVelocityError,
+    rideVelocityError,
+    hihatOpenVelocityError,
+    crashVelocityError,
+    tomsVelocityError,
+    generateError,
+  ].filter(Boolean);
+  const inlineErrorText = inlineErrors.join(" • ");
   const timeSignature = timeSignatureFromGrouping(groupingInput);
   const gridRows = buildGridRows(pattern);
 
@@ -2450,17 +2463,6 @@ function App() {
                 <h2>Playback & Actions</h2>
                 <p>Generate, preview, export, and toggle edit mode from one stable control area.</p>
               </div>
-
-              {loadError ? <p className="message error">{loadError}</p> : null}
-              {currentGroupingError ? <p className="message error">{currentGroupingError}</p> : null}
-              {kickVelocityError ? <p className="message error">{kickVelocityError}</p> : null}
-              {snareVelocityError ? <p className="message error">{snareVelocityError}</p> : null}
-              {hihatClosedVelocityError ? <p className="message error">{hihatClosedVelocityError}</p> : null}
-              {rideVelocityError ? <p className="message error">{rideVelocityError}</p> : null}
-              {hihatOpenVelocityError ? <p className="message error">{hihatOpenVelocityError}</p> : null}
-              {crashVelocityError ? <p className="message error">{crashVelocityError}</p> : null}
-              {tomsVelocityError ? <p className="message error">{tomsVelocityError}</p> : null}
-              {generateError ? <p className="message error">{generateError}</p> : null}
 
               <div className="action-group">
                 <div className="playback-actions">
@@ -3423,11 +3425,18 @@ function App() {
           <section className="pattern-grid-card card">
             <div className="pattern-grid-head">
               <h3>Pattern Grid</h3>
-              <p>
-                {isEditGridEnabled
-                  ? "Click a filled cell to remove the visible hit, click an empty cell to add a manual main hit, and drag horizontally on the same row to move hits."
-                  : "Grid editing is off. Inspect the generated pattern visually without changing it."}
-              </p>
+              <div className="pattern-grid-head-meta">
+                {inlineErrorText ? (
+                  <span className="pattern-grid-error-inline" title={inlineErrorText}>
+                    {inlineErrorText}
+                  </span>
+                ) : null}
+                <p>
+                  {isEditGridEnabled
+                    ? "Click a filled cell to remove the visible hit, click an empty cell to add a manual main hit, and drag horizontally on the same row to move hits."
+                    : "Grid editing is off. Inspect the generated pattern visually without changing it."}
+                </p>
+              </div>
             </div>
 
             <div
