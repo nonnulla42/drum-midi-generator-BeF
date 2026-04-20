@@ -343,12 +343,67 @@ function LockIcon({ locked }: { locked: boolean }) {
 
 function velocityColor(velocity: number): string {
   const clamped = Math.max(1, Math.min(127, velocity));
-  const t = (clamped - 1) / 126;
-  const start = { r: 186, g: 239, b: 174 };
-  const end = { r: 111, g: 76, b: 214 };
-  const r = Math.round(start.r + (end.r - start.r) * t);
-  const g = Math.round(start.g + (end.g - start.g) * t);
-  const b = Math.round(start.b + (end.b - start.b) * t);
+  const mutedGreen = { h: 145, s: 10, l: 34 };
+  const activeGreen = { h: 180, s: 52, l: 55 };
+  const vividViolet = { h: 271, s: 92, l: 70 };
+  const brightViolet = { h: 278, s: 96, l: 74 };
+  let from = mutedGreen;
+  let to = activeGreen;
+  let localT = 0;
+
+  if (clamped <= 84) {
+    localT = (clamped - 1) / 83;
+    localT = localT * localT * (3 - 2 * localT);
+  } else if (clamped <= 100) {
+    from = activeGreen;
+    to = vividViolet;
+    localT = (clamped - 85) / 15;
+  } else {
+    from = vividViolet;
+    to = brightViolet;
+    localT = (clamped - 101) / 26;
+  }
+
+  const hue =
+    Math.abs(to.h - from.h) > 180 && to.h > from.h
+      ? from.h + (((to.h - 360) - from.h) * localT)
+      : Math.abs(to.h - from.h) > 180
+        ? from.h + ((to.h - (from.h - 360)) * localT)
+        : from.h + (to.h - from.h) * localT;
+  const saturation = from.s + (to.s - from.s) * localT;
+  const lightness = from.l + (to.l - from.l) * localT;
+  const normalizedHue = ((hue % 360) + 360) % 360;
+  const chroma = (1 - Math.abs((2 * lightness) / 100 - 1)) * (saturation / 100);
+  const sector = normalizedHue / 60;
+  const x = chroma * (1 - Math.abs((sector % 2) - 1));
+  const match = lightness / 100 - chroma / 2;
+  let redPrime = 0;
+  let greenPrime = 0;
+  let bluePrime = 0;
+
+  if (sector >= 0 && sector < 1) {
+    redPrime = chroma;
+    greenPrime = x;
+  } else if (sector < 2) {
+    redPrime = x;
+    greenPrime = chroma;
+  } else if (sector < 3) {
+    greenPrime = chroma;
+    bluePrime = x;
+  } else if (sector < 4) {
+    greenPrime = x;
+    bluePrime = chroma;
+  } else if (sector < 5) {
+    redPrime = x;
+    bluePrime = chroma;
+  } else {
+    redPrime = chroma;
+    bluePrime = x;
+  }
+
+  const r = Math.round((redPrime + match) * 255);
+  const g = Math.round((greenPrime + match) * 255);
+  const b = Math.round((bluePrime + match) * 255);
   return `rgb(${r}, ${g}, ${b})`;
 }
 
@@ -1996,7 +2051,7 @@ function App() {
     setFillEvery(randomChoice([1, 2, 4, 8]));
     setFillLength(randomChoice(["short", "medium", "long"]));
     setFillIntensity(randomChoice(["off", "low", "medium", "high"]));
-    setSeed(randomInt(0, 999999));
+    setSeed("random");
 
     setKickDensity(randomFloat(0.1, 0.95));
     setKickSyncopation(randomInt(0, 5));
@@ -2351,7 +2406,9 @@ function App() {
               </div>
 
               <div className="band-grid band-grid-backbone">
-              <section className="instrument-card instrument-card-kick">
+              <section
+                className={`instrument-card instrument-card-kick ${kickEnabled ? "instrument-card-green-enabled" : "instrument-card-green-disabled"}`}
+              >
                 <div className="instrument-head">
                   <h3>Kick</h3>
                   <label className="field-checkbox field-checkbox-icon" aria-label="Kick enabled">
@@ -2432,7 +2489,9 @@ function App() {
                 </div>
               </section>
 
-              <section className="instrument-card instrument-card-snare">
+              <section
+                className={`instrument-card instrument-card-snare ${snareEnabled ? "instrument-card-green-enabled" : "instrument-card-green-disabled"}`}
+              >
                 <div className="instrument-head">
                   <h3>Snare</h3>
                   <label className="field-checkbox field-checkbox-icon" aria-label="Snare enabled">
@@ -2512,7 +2571,7 @@ function App() {
                     />
                   </div>
 
-                  <div className="snare-ghost-section">
+                  <div className={`snare-ghost-section ${snareGhostEnabled ? "ghost-section-enabled" : "ghost-section-disabled"}`}>
                     <div className="snare-ghost-head">
                       <h4>Ghost Layer</h4>
                       <label className="field-checkbox field-checkbox-icon" aria-label="Snare ghost enabled">
@@ -2612,7 +2671,9 @@ function App() {
               </div>
 
               <div className="band-grid band-grid-2">
-              <section className="instrument-card instrument-card-hihat-closed">
+              <section
+                className={`instrument-card instrument-card-hihat-closed ${hihatClosedEnabled ? "instrument-card-green-enabled" : "instrument-card-green-disabled"}`}
+              >
                 <div className="instrument-head">
                   <h3>Hi-Hat Closed</h3>
                   <label className="field-checkbox field-checkbox-icon" aria-label="Hi-Hat Closed enabled">
@@ -2698,7 +2759,9 @@ function App() {
                     />
                   </div>
 
-                  <div className="hihat-closed-ghost-section">
+                  <div
+                    className={`hihat-closed-ghost-section ${hihatClosedGhostEnabled ? "ghost-section-enabled" : "ghost-section-disabled"}`}
+                  >
                     <div className="hihat-closed-ghost-head">
                       <h4>ghost layer</h4>
                       <label className="field-checkbox field-checkbox-icon" aria-label="Hi-Hat Closed ghost enabled">
@@ -2758,7 +2821,9 @@ function App() {
                 </div>
               </section>
 
-              <section className="instrument-card instrument-card-ride">
+              <section
+                className={`instrument-card instrument-card-ride ${rideEnabled ? "instrument-card-green-enabled" : "instrument-card-green-disabled"}`}
+              >
                 <div className="instrument-head">
                   <h3>Ride</h3>
                   <label className="field-checkbox field-checkbox-icon" aria-label="Ride enabled">
@@ -2844,7 +2909,7 @@ function App() {
                     />
                   </div>
 
-                  <div className="ride-ghost-section">
+                  <div className={`ride-ghost-section ${rideGhostEnabled ? "ghost-section-enabled" : "ghost-section-disabled"}`}>
                     <div className="ride-ghost-head">
                       <h4>ghost layer</h4>
                       <label className="field-checkbox field-checkbox-icon" aria-label="Ride ghost enabled">
@@ -2913,7 +2978,9 @@ function App() {
               </div>
 
               <div className="band-grid band-grid-accents">
-              <section className="instrument-card instrument-card-compact instrument-card-accent-knob instrument-card-hihat-open">
+              <section
+                className={`instrument-card instrument-card-compact instrument-card-accent-knob instrument-card-hihat-open ${hihatOpenEnabled ? "instrument-card-green-enabled" : "instrument-card-green-disabled"}`}
+              >
                 <div className="instrument-head">
                   <h3>Hi-Hat Open</h3>
                   <label className="field-checkbox field-checkbox-icon" aria-label="Hi-Hat Open enabled">
@@ -2963,7 +3030,9 @@ function App() {
                 </div>
               </section>
 
-              <section className="instrument-card instrument-card-compact instrument-card-accent-knob instrument-card-crash">
+              <section
+                className={`instrument-card instrument-card-compact instrument-card-accent-knob instrument-card-crash ${crashEnabled ? "instrument-card-green-enabled" : "instrument-card-green-disabled"}`}
+              >
                 <div className="instrument-head">
                   <h3>Crash</h3>
                   <label className="field-checkbox field-checkbox-icon" aria-label="Crash enabled">
