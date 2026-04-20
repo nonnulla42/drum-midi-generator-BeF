@@ -143,6 +143,30 @@ def clamp_velocity(velocity: int) -> int:
     return max(1, min(127, velocity))
 
 
+def clamp_int(value: int, minimum: int, maximum: int) -> int:
+    return max(minimum, min(maximum, value))
+
+
+def timing_feel_bias_amount(base_timing_amount: int) -> int:
+    return clamp_int(4 + round(base_timing_amount * 0.25), 4, 8)
+
+
+def timing_feel_bias(feel: str, base_timing_amount: int, rng: random.Random) -> int:
+    bias_amount = timing_feel_bias_amount(base_timing_amount)
+    if feel == "push":
+        return -bias_amount
+    if feel == "drag":
+        return bias_amount
+    if feel == "random":
+        return rng.randint(-bias_amount, bias_amount)
+    return 0
+
+
+def timing_offset_limit(timing_amount: int, base_timing_amount: int) -> int:
+    bias_amount = timing_feel_bias_amount(base_timing_amount)
+    return clamp_int(max(8, timing_amount + bias_amount), 8, 24)
+
+
 def evenly_spaced_slots(numerator: int, step: int = 2) -> list[int]:
     return list(range(0, total_slots_per_bar(numerator), step))
 

@@ -28,6 +28,8 @@ from core.timing import (
     parse_grouping,
     scaled_humanize_amount,
     slot_shape_curve,
+    timing_feel_bias,
+    timing_offset_limit,
     total_slots_per_bar,
     velocity_from_priority,
 )
@@ -2291,12 +2293,12 @@ class DrumPatternGenerator:
                 timing_amount = max(timing_amount, 2) + 2
                 velocity_amount = max(1, velocity_amount // 2 + 2)
             offset = rng.randint(-timing_amount, timing_amount) if timing_amount else 0
-            offset += _timing_feel_bias(
+            offset += timing_feel_bias(
                 instruments[hit.instrument].timing_feel,
                 base_timing_amount,
                 rng,
             )
-            max_offset = _timing_offset_limit(timing_amount, base_timing_amount)
+            max_offset = timing_offset_limit(timing_amount, base_timing_amount)
             hit.micro_timing_offset = _clamp_int(offset, -max_offset, max_offset)
             hit.velocity = humanize_velocity(hit.velocity, velocity_amount, rng)
             if hit.hit_type == HIT_GHOST:
@@ -3157,26 +3159,6 @@ def _pulse_drop_weight(config: InstrumentConfig, slot: int) -> float:
 
 def _clamp_int(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
-
-
-def _timing_feel_bias_amount(base_timing_amount: int) -> int:
-    return _clamp_int(4 + round(base_timing_amount * 0.25), 4, 8)
-
-
-def _timing_feel_bias(feel: str, base_timing_amount: int, rng: random.Random) -> int:
-    bias_amount = _timing_feel_bias_amount(base_timing_amount)
-    if feel == "push":
-        return -bias_amount
-    if feel == "drag":
-        return bias_amount
-    if feel == "random":
-        return rng.randint(-bias_amount, bias_amount)
-    return 0
-
-
-def _timing_offset_limit(timing_amount: int, base_timing_amount: int) -> int:
-    bias_amount = _timing_feel_bias_amount(base_timing_amount)
-    return _clamp_int(max(8, timing_amount + bias_amount), 8, 24)
 
 
 def _open_hat_group_priority_map(group_size: int) -> dict[int, float]:

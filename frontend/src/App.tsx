@@ -833,6 +833,10 @@ function HandleOptionSliderControl({
     if (dragPointerIdRef.current !== event.pointerId) {
       return;
     }
+    if (event.pointerType === "mouse" && event.buttons === 0) {
+      dragPointerIdRef.current = null;
+      return;
+    }
 
     commitFromPointer(event.clientX, event.clientY);
   }

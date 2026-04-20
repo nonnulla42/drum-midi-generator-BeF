@@ -150,6 +150,27 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(added["source"], "manual")
         self.assertEqual(added["velocity"], 83)
 
+    def test_add_base_hit_applies_timing_feel_bias_from_context(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
+
+        updated = add_base_hit(
+            PatternCellRequest(
+                pattern=PatternPayloadRequest(**payload),
+                instrument="hihat_closed",
+                bar=0,
+                slot=1,
+                context=GenerateRequest(
+                    bpm=120,
+                    humanize_timing=0,
+                    humanize_velocity=0,
+                    hihat_closed_timing_feel="drag",
+                ),
+            )
+        )
+        added = next(event for event in updated["events"]["hihat_closed"] if event["bar"] == 0 and event["slot"] == 1)
+
+        self.assertEqual(added["offset"], 4)
+
     def test_remove_hit_removes_visible_hit_at_cell(self) -> None:
         payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
         updated = add_base_hit(PatternCellRequest(pattern=PatternPayloadRequest(**payload), instrument="kick", bar=0, slot=1))

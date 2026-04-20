@@ -237,9 +237,12 @@ class DrumPattern:
     ) -> DrumHit | None:
         from core.timing import (
             clamp_velocity,
+            clamp_int,
             humanize_velocity,
             note_length_ticks,
             scaled_humanize_amount,
+            timing_feel_bias,
+            timing_offset_limit,
             velocity_from_priority,
         )
 
@@ -255,7 +258,11 @@ class DrumPattern:
         velocity = velocity_from_priority(base_priority, config.velocity_min, config.velocity_max)
         velocity = humanize_velocity(velocity, scaled_humanize_amount(humanize_velocity_amount), rng)
         velocity = clamp_velocity(max(config.velocity_min, min(config.velocity_max, velocity)))
-        timing_amount = scaled_humanize_amount(humanize_timing)
+        base_timing_amount = scaled_humanize_amount(humanize_timing)
+        timing_amount = base_timing_amount
+        offset = rng.randint(-timing_amount, timing_amount) if timing_amount else 0
+        offset += timing_feel_bias(config.timing_feel, base_timing_amount, rng)
+        max_offset = timing_offset_limit(timing_amount, base_timing_amount)
         hit = DrumHit(
             instrument=instrument_key,
             midi_note=config.midi_note,
@@ -264,7 +271,7 @@ class DrumPattern:
             velocity=velocity,
             priority=base_priority,
             hit_type=HIT_MAIN,
-            micro_timing_offset=rng.randint(-timing_amount, timing_amount) if timing_amount else 0,
+            micro_timing_offset=clamp_int(offset, -max_offset, max_offset),
             length_ticks=note_length_ticks(HIT_MAIN),
             source="manual",
         )
