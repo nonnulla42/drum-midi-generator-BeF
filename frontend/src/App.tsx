@@ -221,6 +221,29 @@ function numeratorFromGrouping(value: string): number | null {
     .reduce((sum, part) => sum + Number(part), 0);
 }
 
+function groupingCombinationsForTotal(total: number): string[] {
+  if (total === 0) {
+    return [""];
+  }
+
+  const combinations: string[] = [];
+  for (let part = 1; part <= 4; part += 1) {
+    if (part > total) {
+      break;
+    }
+    for (const suffix of groupingCombinationsForTotal(total - part)) {
+      combinations.push(suffix ? `${part}+${suffix}` : `${part}`);
+    }
+  }
+  return combinations;
+}
+
+function randomGroupingValue(rng: () => number): string {
+  const total = Math.floor(rng() * 8) + 3;
+  const combinations = groupingCombinationsForTotal(total);
+  return combinations[Math.floor(rng() * combinations.length)] ?? "4";
+}
+
 function hitPriority(hitType: PatternEvent["hit_type"]): number {
   if (hitType === "accent") {
     return 0;
@@ -705,6 +728,7 @@ type HandleOptionSliderControlProps = {
   slotCount?: number;
   disabled?: boolean;
   showValueInHandle?: boolean;
+  className?: string;
 };
 
 function HandleOptionSliderControl({
@@ -716,6 +740,7 @@ function HandleOptionSliderControl({
   slotCount,
   disabled = false,
   showValueInHandle = false,
+  className = "",
 }: HandleOptionSliderControlProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
@@ -830,7 +855,7 @@ function HandleOptionSliderControl({
   }
 
   return (
-    <div className="field">
+    <div className={className ? `field ${className}` : "field"}>
       <div className="plugin-control-head">
         <span>{label}</span>
       </div>
@@ -902,6 +927,7 @@ type ContinuousSliderControlProps = {
   step: number;
   onChange: (value: number) => void;
   showValueInHandle?: boolean;
+  enableWheel?: boolean;
 };
 
 function ContinuousSliderControl({
@@ -912,6 +938,7 @@ function ContinuousSliderControl({
   step,
   onChange,
   showValueInHandle = false,
+  enableWheel = false,
 }: ContinuousSliderControlProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
@@ -979,6 +1006,16 @@ function ContinuousSliderControl({
     }
   }
 
+  function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    if (!enableWheel || event.deltaY === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const direction = event.deltaY < 0 ? 1 : -1;
+    onChange(snapToStep(clampValue(value + direction * step, min, max), min, step));
+  }
+
   return (
     <div className="field">
       <div className="plugin-control-head">
@@ -1008,6 +1045,7 @@ function ContinuousSliderControl({
           dragPointerIdRef.current = null;
         }}
         onKeyDown={handleKeyDown}
+        onWheel={handleWheel}
       >
         <div className="continuous-slider-track">
           <div className="continuous-slider-fill" style={{ width: `${percent}%` }} />
@@ -1228,9 +1266,10 @@ type VerticalSliderControlProps = {
   max: number;
   step: number;
   onChange: (value: number) => void;
+  showValueInHandle?: boolean;
 };
 
-function VerticalSliderControl({ label, value, min, max, step, onChange }: VerticalSliderControlProps) {
+function VerticalSliderControl({ label, value, min, max, step, onChange, showValueInHandle = false }: VerticalSliderControlProps) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const dragPointerIdRef = useRef<number | null>(null);
   const range = max - min;
@@ -1321,7 +1360,12 @@ function VerticalSliderControl({ label, value, min, max, step, onChange }: Verti
       >
         <div className="vertical-slider-track">
           <div className="vertical-slider-fill" style={{ height: `${handlePercent}%` }} />
-          <div className="vertical-slider-handle" style={{ bottom: `${handlePercent}%` }} />
+          <div
+            className={showValueInHandle ? "vertical-slider-handle vertical-slider-handle-valued" : "vertical-slider-handle"}
+            style={{ bottom: `${handlePercent}%` }}
+          >
+            {showValueInHandle ? <span>{value}</span> : null}
+          </div>
         </div>
       </div>
 
@@ -1863,6 +1907,7 @@ function App() {
     setIsGeneratingPattern(true);
 
     try {
+      stopPlaybackStatefully();
       const request = buildRequest();
       const requestSignature = JSON.stringify(request);
       const shouldShowFixedSeedWarning =
@@ -2048,6 +2093,7 @@ function App() {
     setSwing(randomFloat(0, 0.28));
     setBarSimilarity(randomFloat(0, 1));
     setBars(randomChoice([1, 2, 4, 8]));
+    setGrouping(randomGroupingValue(rng));
     setFillEvery(randomChoice([1, 2, 4, 8]));
     setFillLength(randomChoice(["short", "medium", "long"]));
     setFillIntensity(randomChoice(["off", "low", "medium", "high"]));
@@ -2104,6 +2150,7 @@ function App() {
                 min={40}
                 max={220}
                 step={1}
+                enableWheel
                 showValueInHandle
                 onChange={(nextValue) => {
                   setBpm(nextValue);
@@ -2115,6 +2162,7 @@ function App() {
                 value={String(bars)}
                 options={PATTERN_LENGTH_OPTIONS}
                 slotCount={4}
+                className="pattern-length-control"
                 showValueInHandle
                 onChange={(nextValue) => {
                   switchToCustomIfNeeded();
@@ -2275,7 +2323,7 @@ function App() {
 
                     <button
                       type="button"
-                      className="button-secondary"
+                      className="button-secondary button-generate-ghosts"
                       onClick={() => void handleGenerateGhosts()}
                       disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
                     >
@@ -2609,6 +2657,7 @@ function App() {
                           max={127}
                           step={1}
                           value={snareGhostVelocity}
+                          showValueInHandle
                           onChange={(nextValue) => {
                             switchToCustomIfNeeded();
                             setSnareGhostVelocity(nextValue);
@@ -2799,6 +2848,7 @@ function App() {
                           max={127}
                           step={1}
                           value={hihatClosedGhostVelocity}
+                          showValueInHandle
                           onChange={(nextValue) => {
                             switchToCustomIfNeeded();
                             setHihatClosedGhostVelocity(nextValue);
@@ -2947,6 +2997,7 @@ function App() {
                           max={127}
                           step={1}
                           value={rideGhostVelocity}
+                          showValueInHandle
                           onChange={(nextValue) => {
                             switchToCustomIfNeeded();
                             setRideGhostVelocity(nextValue);
