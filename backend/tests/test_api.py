@@ -101,6 +101,55 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(added["length_ticks"], 70)
         self.assertLessEqual(abs(added["offset"]), 0)
 
+    def test_add_base_hit_uses_request_context_instead_of_default_instrument_values(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
+
+        updated = add_base_hit(
+            PatternCellRequest(
+                pattern=PatternPayloadRequest(**payload),
+                instrument="kick",
+                bar=0,
+                slot=1,
+                context=GenerateRequest(
+                    bpm=144,
+                    humanize_timing=0,
+                    humanize_velocity=0,
+                    kick_velocity_min=127,
+                    kick_velocity_max=127,
+                ),
+            )
+        )
+        added = next(event for event in updated["events"]["kick"] if event["bar"] == 0 and event["slot"] == 1)
+
+        self.assertEqual(updated["meta"]["bpm"], 144)
+        self.assertEqual(updated["meta"]["humanize_timing"], 0)
+        self.assertEqual(updated["meta"]["humanize_velocity"], 0)
+        self.assertEqual(added["velocity"], 127)
+        self.assertEqual(added["offset"], 0)
+
+    def test_add_base_hit_allows_manual_hits_on_disabled_instruments(self) -> None:
+        payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
+
+        updated = add_base_hit(
+            PatternCellRequest(
+                pattern=PatternPayloadRequest(**payload),
+                instrument="tom_high",
+                bar=0,
+                slot=1,
+                context=GenerateRequest(
+                    bpm=120,
+                    humanize_timing=0,
+                    humanize_velocity=0,
+                    toms_velocity_min=83,
+                    toms_velocity_max=83,
+                ),
+            )
+        )
+        added = next(event for event in updated["events"]["tom_high"] if event["bar"] == 0 and event["slot"] == 1)
+
+        self.assertEqual(added["source"], "manual")
+        self.assertEqual(added["velocity"], 83)
+
     def test_remove_hit_removes_visible_hit_at_cell(self) -> None:
         payload = generate_pattern(GenerateRequest(bpm=120, humanize_timing=0, humanize_velocity=0))
         updated = add_base_hit(PatternCellRequest(pattern=PatternPayloadRequest(**payload), instrument="kick", bar=0, slot=1))

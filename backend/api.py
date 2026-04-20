@@ -151,6 +151,7 @@ class PatternCellRequest(BaseModel):
     instrument: str
     bar: int = Field(ge=0)
     slot: int = Field(ge=0)
+    context: GenerateRequest | None = None
 
 
 class PatternMoveRequest(BaseModel):
@@ -161,6 +162,7 @@ class PatternMoveRequest(BaseModel):
     to_bar: int = Field(ge=0)
     to_slot: int = Field(ge=0)
     hit_type: Literal["main", "accent", "ghost"]
+    context: GenerateRequest | None = None
 
 
 class PatternGenerateGhostsRequest(BaseModel):
@@ -305,16 +307,7 @@ def _delete_file(path: str) -> None:
         os.unlink(path)
 
 
-def _build_pattern(request: GenerateRequest):
-    if request.preset is None:
-        settings = GlobalSettings()
-        instruments = build_default_instruments()
-    else:
-        try:
-            settings, instruments = load_preset(request.preset)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
+def _apply_generate_request_overrides(settings, instruments, request: GenerateRequest) -> None:
     settings.bpm = request.bpm
     if request.bars is not None:
         settings.bars = request.bars
@@ -478,6 +471,18 @@ def _build_pattern(request: GenerateRequest):
     if tom_high.velocity_max < tom_high.velocity_min:
         raise HTTPException(status_code=400, detail="Toms velocity max must be greater than or equal to min")
 
+
+def _build_pattern(request: GenerateRequest):
+    if request.preset is None:
+        settings = GlobalSettings()
+        instruments = build_default_instruments()
+    else:
+        try:
+            settings, instruments = load_preset(request.preset)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    _apply_generate_request_overrides(settings, instruments, request)
     return generator.generate(settings, instruments)
 
 
@@ -555,6 +560,8 @@ def generate_pattern(request: GenerateRequest):
 @app.post("/pattern/add-base-hit")
 def add_base_hit(request: PatternCellRequest):
     pattern = _pattern_from_payload(request.pattern)
+    if request.context is not None:
+        _apply_generate_request_overrides(pattern.settings, pattern.instruments, request.context)
     config = pattern.instruments.get(request.instrument)
     if config is None:
         raise HTTPException(status_code=400, detail=f"Unknown instrument: {request.instrument}")
@@ -575,6 +582,8 @@ def add_base_hit(request: PatternCellRequest):
 @app.post("/pattern/remove-hit")
 def remove_hit(request: PatternCellRequest):
     pattern = _pattern_from_payload(request.pattern)
+    if request.context is not None:
+        _apply_generate_request_overrides(pattern.settings, pattern.instruments, request.context)
     if request.instrument not in pattern.instruments:
         raise HTTPException(status_code=400, detail=f"Unknown instrument: {request.instrument}")
 
@@ -590,6 +599,8 @@ def remove_hit(request: PatternCellRequest):
 @app.post("/pattern/move-hit")
 def move_hit(request: PatternMoveRequest):
     pattern = _pattern_from_payload(request.pattern)
+    if request.context is not None:
+        _apply_generate_request_overrides(pattern.settings, pattern.instruments, request.context)
     if request.instrument not in pattern.instruments:
         raise HTTPException(status_code=400, detail=f"Unknown instrument: {request.instrument}")
 

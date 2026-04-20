@@ -319,17 +319,36 @@ function buildGridRows(pattern: GeneratedPattern) {
   });
 }
 
-function buildPlaceholderGridRows() {
-  return PLACEHOLDER_GRID_INSTRUMENTS.map((instrument) => ({
-    instrument,
-    label: INSTRUMENT_LABELS[instrument] ?? instrument,
-    bars: [
-      Array.from({ length: 32 }, () => ({
-        event: null,
-        fillActive: false,
-      })),
-    ],
-  }));
+function patternHasEvents(pattern: GeneratedPattern): boolean {
+  return pattern.instrument_order.some((instrument) => (pattern.events[instrument] ?? []).length > 0);
+}
+
+function createEmptyPattern(input: {
+  bpm: number;
+  bars: number;
+  grouping: string;
+  swing: number;
+  humanizeTiming: number;
+  humanizeVelocity: number;
+}): GeneratedPattern {
+  const normalizedGrouping = normalizeGrouping(input.grouping);
+  const numerator = numeratorFromGrouping(normalizedGrouping) ?? 4;
+
+  return {
+    pattern_version: 1,
+    meta: {
+      bpm: input.bpm,
+      bars: input.bars,
+      grouping: normalizedGrouping,
+      slots_per_bar: numerator * 8,
+      swing: input.swing,
+      humanize_timing: input.humanizeTiming,
+      humanize_velocity: input.humanizeVelocity,
+    },
+    instrument_order: [...PLACEHOLDER_GRID_INSTRUMENTS],
+    events: Object.fromEntries(PLACEHOLDER_GRID_INSTRUMENTS.map((instrument) => [instrument, []])),
+    fill_regions: [],
+  };
 }
 
 function LockIcon({ locked }: { locked: boolean }) {
@@ -1427,6 +1446,7 @@ function App() {
   const [seed, setSeed] = useState<number | "random">("random");
   const [bars, setBars] = useState(1);
   const [grouping, setGrouping] = useState("4");
+  const [groupingInput, setGroupingInput] = useState("4");
   const [swing, setSwing] = useState(0);
   const [humanizeTiming, setHumanizeTiming] = useState(6);
   const [humanizeVelocity, setHumanizeVelocity] = useState(6);
@@ -1501,7 +1521,16 @@ function App() {
   const [tomsLowHits, setTomsLowHits] = useState(DEFAULT_TOMS.lowHits);
   const [tomsVelocityMin, setTomsVelocityMin] = useState(DEFAULT_TOMS.velocityMin);
   const [tomsVelocityMax, setTomsVelocityMax] = useState(DEFAULT_TOMS.velocityMax);
-  const [pattern, setPattern] = useState<GeneratedPattern | null>(null);
+  const [pattern, setPattern] = useState<GeneratedPattern>(() =>
+    createEmptyPattern({
+      bpm: 120,
+      bars: 1,
+      grouping: "4",
+      swing: 0,
+      humanizeTiming: 6,
+      humanizeVelocity: 6,
+    }),
+  );
   const [lockedInstruments, setLockedInstruments] = useState<string[]>([]);
   const [isLoadingPresets, setIsLoadingPresets] = useState(true);
   const [isGeneratingPattern, setIsGeneratingPattern] = useState(false);
@@ -1522,11 +1551,10 @@ function App() {
   const [seedFixedWarningVisible, setSeedFixedWarningVisible] = useState(false);
   const [ghostRerollCount, setGhostRerollCount] = useState(0);
   const patternPlayerRef = useRef<PatternPlayer | null>(null);
-  const lockResetKeyRef = useRef(`${bars}:${normalizeGrouping(grouping)}`);
   const lastGenerateSignatureRef = useRef<string | null>(null);
   const seedWarningTimeoutRef = useRef<number | null>(null);
 
-  const currentGroupingError = groupingError(grouping);
+  const currentGroupingError = groupingError(groupingInput);
   const kickVelocityError =
     kickVelocityMax < kickVelocityMin ? "Kick velocity max must be greater than or equal to min." : "";
   const snareVelocityError =
@@ -1542,24 +1570,8 @@ function App() {
     crashVelocityMax < crashVelocityMin ? "Crash velocity max must be greater than or equal to min." : "";
   const tomsVelocityError =
     tomsVelocityMax < tomsVelocityMin ? "Toms velocity max must be greater than or equal to min." : "";
-  const timeSignature = timeSignatureFromGrouping(grouping);
-  const gridRows = pattern ? buildGridRows(pattern) : [];
-  const placeholderGridRows = buildPlaceholderGridRows();
-
-  useEffect(() => {
-    const nextKey = `${bars}:${normalizeGrouping(grouping)}`;
-    if (lockResetKeyRef.current === nextKey) {
-      return;
-    }
-    lockResetKeyRef.current = nextKey;
-    setLockedInstruments([]);
-  }, [bars, grouping]);
-
-  useEffect(() => {
-    if (!pattern) {
-      setLockedInstruments([]);
-    }
-  }, [pattern]);
+  const timeSignature = timeSignatureFromGrouping(groupingInput);
+  const gridRows = buildGridRows(pattern);
 
   useEffect(() => {
     let isMounted = true;
@@ -1606,7 +1618,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (playbackStatus !== "Playing" || !pattern) {
+    if (playbackStatus !== "Playing") {
       return;
     }
 
@@ -1614,6 +1626,31 @@ function App() {
       setPlaybackStatus("Stopped");
     });
   }, [bpm, pattern, playbackStatus]);
+
+  useEffect(() => {
+    if (patternHasEvents(pattern)) {
+      return;
+    }
+    if (
+      pattern.meta.bpm === bpm &&
+      pattern.meta.swing === swing &&
+      pattern.meta.humanize_timing === humanizeTiming &&
+      pattern.meta.humanize_velocity === humanizeVelocity
+    ) {
+      return;
+    }
+
+    setPattern((current) => ({
+      ...current,
+      meta: {
+        ...current.meta,
+        bpm,
+        swing,
+        humanize_timing: humanizeTiming,
+        humanize_velocity: humanizeVelocity,
+      },
+    }));
+  }, [bpm, humanizeTiming, humanizeVelocity, pattern, swing]);
 
   function getPatternPlayer() {
     if (!patternPlayerRef.current) {
@@ -1627,6 +1664,66 @@ function App() {
     setPlaybackStatus("Stopped");
   }
 
+  function resetPatternToEmpty(nextBars = bars, nextGrouping = grouping) {
+    setPattern(
+      createEmptyPattern({
+        bpm,
+        bars: nextBars,
+        grouping: nextGrouping,
+        swing,
+        humanizeTiming,
+        humanizeVelocity,
+      }),
+    );
+    setLockedInstruments([]);
+    setGhostRerollCount(0);
+    setGenerateError("");
+  }
+
+  function applyStructureChange(nextBars: number, nextGroupingRaw: string): boolean {
+    if (groupingError(nextGroupingRaw)) {
+      setBars(nextBars);
+      setGroupingInput(nextGroupingRaw);
+      return false;
+    }
+
+    const normalizedGrouping = normalizeGrouping(nextGroupingRaw);
+    const structureChanged = pattern.meta.bars !== nextBars || pattern.meta.grouping !== normalizedGrouping;
+
+    if (!structureChanged) {
+      setBars(nextBars);
+      setGrouping(normalizedGrouping);
+      setGroupingInput(nextGroupingRaw);
+      return true;
+    }
+
+    if (patternHasEvents(pattern) && !window.confirm("Changing structure will reset the current pattern.")) {
+      setBars(pattern.meta.bars);
+      setGrouping(pattern.meta.grouping);
+      setGroupingInput(pattern.meta.grouping);
+      return false;
+    }
+
+    stopPlaybackStatefully();
+    setBars(nextBars);
+    setGrouping(normalizedGrouping);
+    setGroupingInput(nextGroupingRaw);
+    resetPatternToEmpty(nextBars, normalizedGrouping);
+    return true;
+  }
+
+  function ensureGroupingCommitted() {
+    const normalizedGrouping = normalizeGrouping(groupingInput);
+    if (currentGroupingError) {
+      return false;
+    }
+    if (normalizedGrouping === grouping) {
+      return true;
+    }
+
+    return applyStructureChange(bars, groupingInput);
+  }
+
   function switchToCustomIfNeeded() {
     if (selectedPreset !== CUSTOM_PRESET_ID) {
       setSelectedPreset(CUSTOM_PRESET_ID);
@@ -1635,11 +1732,13 @@ function App() {
   }
 
   function applyPreset(preset: Preset) {
+    if (!applyStructureChange(preset.settings.bars, preset.settings.grouping)) {
+      return;
+    }
+
     setSelectedPreset(preset.id);
     setBpm(preset.settings.bpm);
     setSeed("random");
-    setBars(preset.settings.bars);
-    setGrouping(preset.settings.grouping);
     setSwing(preset.settings.swing);
     setHumanizeTiming(preset.settings.humanize_timing);
     setHumanizeVelocity(preset.settings.humanize_velocity);
@@ -1701,7 +1800,6 @@ function App() {
     setTomsVelocityMin(preset.toms.velocity_min);
     setTomsVelocityMax(preset.toms.velocity_max);
     stopPlaybackStatefully();
-    setGhostRerollCount(0);
     setGenerateError("");
   }
 
@@ -1754,7 +1852,7 @@ function App() {
       bpm,
       seed: seed === "random" ? undefined : seed,
       bars,
-      grouping: normalizeGrouping(grouping),
+      grouping: normalizeGrouping(groupingInput),
       swing,
       humanize_timing: humanizeTiming,
       humanize_velocity: humanizeVelocity,
@@ -1814,8 +1912,32 @@ function App() {
     };
   }
 
+  function buildPatternEditContext(): GenerateMidiInput {
+    return {
+      ...buildRequest(),
+      bars: pattern.meta.bars,
+      grouping: pattern.meta.grouping,
+    };
+  }
+
+  function getPatternForCurrentStructure() {
+    const activeGrouping = currentGroupingError ? grouping : normalizeGrouping(groupingInput);
+    if (pattern.meta.bars === bars && pattern.meta.grouping === activeGrouping) {
+      return pattern;
+    }
+
+    return createEmptyPattern({
+      bpm,
+      bars,
+      grouping: activeGrouping,
+      swing,
+      humanizeTiming,
+      humanizeVelocity,
+    });
+  }
+
   async function handleGridCellClick(instrument: string, barIndex: number, slotIndex: number, event: PatternEvent | null) {
-    if (!pattern || isEditingPattern || !isEditGridEnabled) {
+    if (isEditingPattern || !isEditGridEnabled) {
       return;
     }
 
@@ -1829,12 +1951,14 @@ function App() {
             instrument,
             bar: barIndex,
             slot: slotIndex,
+            context: buildPatternEditContext(),
           })
         : await addPatternBaseHit({
             pattern,
             instrument,
             bar: barIndex,
             slot: slotIndex,
+            context: buildPatternEditContext(),
           });
       setPattern(nextPattern);
     } catch (error) {
@@ -1845,7 +1969,7 @@ function App() {
   }
 
   async function handleGridDrop(instrument: string, barIndex: number, slotIndex: number) {
-    if (!pattern || !dragState || isEditingPattern || !isEditGridEnabled) {
+    if (!dragState || isEditingPattern || !isEditGridEnabled) {
       return;
     }
     if (dragState.instrument !== instrument) {
@@ -1869,6 +1993,7 @@ function App() {
         to_bar: barIndex,
         to_slot: slotIndex,
         hit_type: dragState.hitType,
+        context: buildPatternEditContext(),
       });
       setPattern(nextPattern);
     } catch (error) {
@@ -1897,6 +2022,13 @@ function App() {
   async function handleGeneratePattern(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (!ensureGroupingCommitted()) {
+      if (currentGroupingError) {
+        setGenerateError(currentGroupingError);
+      }
+      return;
+    }
+
     const validationError = getValidationError();
     if (validationError) {
       setGenerateError(validationError);
@@ -1912,7 +2044,7 @@ function App() {
       const requestSignature = JSON.stringify(request);
       const shouldShowFixedSeedWarning =
         request.seed !== undefined && lastGenerateSignatureRef.current === requestSignature;
-      const currentPattern = pattern;
+      const currentPattern = getPatternForCurrentStructure();
       const nextPattern = await generatePattern(request);
       setPattern(mergeLockedInstrumentEvents(currentPattern, nextPattern, lockedInstruments));
       setGhostRerollCount(0);
@@ -1935,6 +2067,13 @@ function App() {
   }
 
   async function handleDownloadMidi() {
+    if (!ensureGroupingCommitted()) {
+      if (currentGroupingError) {
+        setGenerateError(currentGroupingError);
+      }
+      return;
+    }
+
     const validationError = getValidationError();
     if (validationError) {
       setGenerateError(validationError);
@@ -1945,7 +2084,8 @@ function App() {
     setIsGenerating(true);
 
     try {
-      const blob = pattern ? await exportPatternMidi(pattern, bpm) : await generateMidi(buildRequest());
+      const currentPattern = getPatternForCurrentStructure();
+      const blob = patternHasEvents(currentPattern) ? await exportPatternMidi(currentPattern, bpm) : await generateMidi(buildRequest());
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -1962,8 +2102,16 @@ function App() {
   }
 
   async function handleGenerateGhosts() {
-    if (!pattern) {
-      setGenerateError("Generate a pattern before generating ghosts.");
+    if (!ensureGroupingCommitted()) {
+      if (currentGroupingError) {
+        setGenerateError(currentGroupingError);
+      }
+      return;
+    }
+
+    const currentPattern = getPatternForCurrentStructure();
+    if (!patternHasEvents(currentPattern)) {
+      setGenerateError("Add base hits or generate a pattern before generating ghosts.");
       return;
     }
 
@@ -1973,7 +2121,7 @@ function App() {
     try {
       stopPlaybackStatefully();
       const nextPattern = await generatePatternGhosts({
-        pattern,
+        pattern: currentPattern,
         seed: seed === "random" ? undefined : seed + ghostRerollCount + 1,
         snare_enabled: snareEnabled,
         snare_ghost_enabled: snareGhostEnabled,
@@ -2003,6 +2151,13 @@ function App() {
   }
 
   async function handlePlay() {
+    if (!ensureGroupingCommitted()) {
+      if (currentGroupingError) {
+        setGenerateError(currentGroupingError);
+      }
+      return;
+    }
+
     const validationError = getValidationError();
     if (validationError) {
       setGenerateError(validationError);
@@ -2011,15 +2166,12 @@ function App() {
 
     setGenerateError("");
     try {
-      let activePattern = pattern;
-      if (!activePattern) {
-        setIsGeneratingPattern(true);
-        activePattern = await generatePattern(buildRequest());
-        setPattern(activePattern);
-        setGhostRerollCount(0);
-        setIsGeneratingPattern(false);
+      const currentPattern = getPatternForCurrentStructure();
+      if (!patternHasEvents(currentPattern)) {
+        setGenerateError("Add hits or generate a pattern first.");
+        return;
       }
-      await getPatternPlayer().play(activePattern, isLoopEnabled, bpm);
+      await getPatternPlayer().play(currentPattern, isLoopEnabled, bpm);
       setPlaybackStatus("Playing");
     } catch (error) {
       setIsGeneratingPattern(false);
@@ -2033,6 +2185,13 @@ function App() {
   }
 
   async function handleRestart() {
+    if (!ensureGroupingCommitted()) {
+      if (currentGroupingError) {
+        setGenerateError(currentGroupingError);
+      }
+      return;
+    }
+
     const validationError = getValidationError();
     if (validationError) {
       setGenerateError(validationError);
@@ -2041,16 +2200,12 @@ function App() {
 
     setGenerateError("");
     try {
-      if (!pattern) {
-        setIsGeneratingPattern(true);
-        const nextPattern = await generatePattern(buildRequest());
-        setPattern(nextPattern);
-        setGhostRerollCount(0);
-        setIsGeneratingPattern(false);
-        await getPatternPlayer().play(nextPattern, isLoopEnabled, bpm);
-      } else {
-        await getPatternPlayer().restart(bpm);
+      const currentPattern = getPatternForCurrentStructure();
+      if (!patternHasEvents(currentPattern)) {
+        setGenerateError("Add hits or generate a pattern first.");
+        return;
       }
+      await getPatternPlayer().play(currentPattern, isLoopEnabled, bpm);
       setPlaybackStatus("Playing");
     } catch (error) {
       setIsGeneratingPattern(false);
@@ -2061,17 +2216,10 @@ function App() {
 
   function handleClearPattern() {
     stopPlaybackStatefully();
-    setPattern(null);
-    setLockedInstruments([]);
-    setGhostRerollCount(0);
-    setGenerateError("");
+    resetPatternToEmpty();
   }
 
   function handleToggleInstrumentLock(instrument: string) {
-    if (!pattern) {
-      return;
-    }
-
     setLockedInstruments((current) =>
       current.includes(instrument)
         ? current.filter((item) => item !== instrument)
@@ -2086,14 +2234,17 @@ function App() {
       Number((min + (max - min) * rng()).toFixed(digits));
     const randomInt = (min: number, max: number) => Math.floor(rng() * (max - min + 1)) + min;
     const betaLikePulseSpace = () => Math.min(0.85, Number((Math.pow(rng(), 1.6) * (1 - Math.pow(rng(), 3.2)) + rng() * 0.15).toFixed(2)));
+    const nextBars = randomChoice([1, 2, 4, 8]);
+    const nextGrouping = randomGroupingValue(rng);
+
+    if (!applyStructureChange(nextBars, nextGrouping)) {
+      return;
+    }
 
     setSelectedPreset(CUSTOM_PRESET_ID);
-    setGhostRerollCount(0);
     setGenerateError("");
     setSwing(randomFloat(0, 0.28));
     setBarSimilarity(randomFloat(0, 1));
-    setBars(randomChoice([1, 2, 4, 8]));
-    setGrouping(randomGroupingValue(rng));
     setFillEvery(randomChoice([1, 2, 4, 8]));
     setFillLength(randomChoice(["short", "medium", "long"]));
     setFillIntensity(randomChoice(["off", "low", "medium", "high"]));
@@ -2166,7 +2317,7 @@ function App() {
                 showValueInHandle
                 onChange={(nextValue) => {
                   switchToCustomIfNeeded();
-                  setBars(Number(nextValue));
+                  applyStructureChange(Number(nextValue), groupingInput);
                 }}
               />
 
@@ -2175,10 +2326,21 @@ function App() {
                   <span>Beat Grouping</span>
                   <input
                     type="text"
-                    value={grouping}
+                    value={groupingInput}
                     onChange={(event) => {
                       switchToCustomIfNeeded();
-                      setGrouping(event.target.value);
+                      setGroupingInput(event.target.value);
+                    }}
+                    onBlur={() => {
+                      if (!currentGroupingError) {
+                        applyStructureChange(bars, groupingInput);
+                      }
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !currentGroupingError) {
+                        event.preventDefault();
+                        applyStructureChange(bars, groupingInput);
+                      }
                     }}
                     placeholder="4 or 3+2"
                   />
@@ -2325,7 +2487,7 @@ function App() {
                       type="button"
                       className="button-secondary button-generate-ghosts"
                       onClick={() => void handleGenerateGhosts()}
-                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
                     >
                       {isGeneratingGhosts ? "Generating Ghosts..." : "Generate Ghosts"}
                     </button>
@@ -2336,7 +2498,7 @@ function App() {
                       type="button"
                       className="button-secondary"
                       onClick={handleClearPattern}
-                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
                     >
                       Clear
                     </button>
@@ -2371,7 +2533,7 @@ function App() {
                         Boolean(tomsVelocityError)
                       }
                     >
-                      {isGenerating ? "Downloading MIDI..." : pattern ? "Download Edited MIDI" : "Download MIDI"}
+                      {isGenerating ? "Downloading MIDI..." : patternHasEvents(pattern) ? "Download Edited MIDI" : "Download MIDI"}
                     </button>
                   </div>
 
@@ -2379,7 +2541,7 @@ function App() {
                     <button
                       type="button"
                       onClick={() => void handlePlay()}
-                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
                     >
                       Play
                     </button>
@@ -2397,7 +2559,7 @@ function App() {
                       type="button"
                       className="button-secondary"
                       onClick={() => void handleRestart()}
-                      disabled={!pattern || isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
                     >
                       Restart
                     </button>
@@ -3264,153 +3426,109 @@ function App() {
               </p>
             </div>
 
-            {pattern ? (
-              <div
-                className={`pattern-grid-scroll ${isEditGridEnabled ? "" : "pattern-grid-scroll-locked"}`}
-                onWheel={handlePatternGridWheel}
-              >
-                <div className="pattern-grid">
-                  {gridRows.map((row) => (
-                    <div key={row.instrument} className="pattern-row">
-                      <div className="pattern-row-label">
-                        <button
-                          type="button"
-                          className={`pattern-row-lock ${lockedInstruments.includes(row.instrument) ? "pattern-row-lock-locked" : ""}`}
-                          aria-label={lockedInstruments.includes(row.instrument) ? `Unlock ${row.label}` : `Lock ${row.label}`}
-                          aria-pressed={lockedInstruments.includes(row.instrument)}
-                          onClick={() => {
-                            handleToggleInstrumentLock(row.instrument);
-                          }}
+            <div
+              className={`pattern-grid-scroll ${isEditGridEnabled ? "" : "pattern-grid-scroll-locked"}`}
+              onWheel={handlePatternGridWheel}
+            >
+              <div className="pattern-grid">
+                {gridRows.map((row) => (
+                  <div key={row.instrument} className="pattern-row">
+                    <div className="pattern-row-label">
+                      <button
+                        type="button"
+                        className={`pattern-row-lock ${lockedInstruments.includes(row.instrument) ? "pattern-row-lock-locked" : ""}`}
+                        aria-label={lockedInstruments.includes(row.instrument) ? `Unlock ${row.label}` : `Lock ${row.label}`}
+                        aria-pressed={lockedInstruments.includes(row.instrument)}
+                        onClick={() => {
+                          handleToggleInstrumentLock(row.instrument);
+                        }}
+                      >
+                        <LockIcon locked={lockedInstruments.includes(row.instrument)} />
+                      </button>
+                      <span>{row.label}</span>
+                    </div>
+
+                    <div className="pattern-row-bars">
+                      {row.bars.map((bar, barIndex) => (
+                        <div
+                          key={`${row.instrument}-${barIndex}`}
+                          className="pattern-bar"
+                          style={{ gridTemplateColumns: `repeat(${pattern.meta.slots_per_bar}, minmax(21px, 1fr))` }}
                         >
-                          <LockIcon locked={lockedInstruments.includes(row.instrument)} />
-                        </button>
-                        <span>{row.label}</span>
-                      </div>
+                          {bar.map((cell, slotIndex) => {
+                            const numerator = numeratorFromGrouping(pattern.meta.grouping) ?? 4;
+                            const quarterSize = pattern.meta.slots_per_bar / numerator;
+                            const style =
+                              cell.event && cell.event.hit_type !== "ghost"
+                                ? { backgroundColor: velocityColor(cell.event.velocity) }
+                                : undefined;
+                            const className = [
+                              "pattern-cell",
+                              cell.fillActive ? "pattern-cell-fill" : "",
+                              cell.event ? `pattern-cell-${cell.event.hit_type}` : "",
+                              cell.event && !isEditGridEnabled ? "pattern-cell-readonly" : "",
+                              slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
+                              slotIndex % 2 === 0 ? "pattern-cell-even" : "",
+                              quarterSize > 0 && slotIndex % quarterSize === 0 ? "pattern-cell-quarter" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ");
 
-                      <div className="pattern-row-bars">
-                        {row.bars.map((bar, barIndex) => (
-                          <div
-                            key={`${row.instrument}-${barIndex}`}
-                            className="pattern-bar"
-                            style={{ gridTemplateColumns: `repeat(${pattern.meta.slots_per_bar}, minmax(21px, 1fr))` }}
-                          >
-                            {bar.map((cell, slotIndex) => {
-                              const numerator = numeratorFromGrouping(pattern.meta.grouping) ?? 4;
-                              const quarterSize = pattern.meta.slots_per_bar / numerator;
-                              const style =
-                                cell.event && cell.event.hit_type !== "ghost"
-                                  ? { backgroundColor: velocityColor(cell.event.velocity) }
-                                  : undefined;
-                              const className = [
-                                "pattern-cell",
-                                cell.fillActive ? "pattern-cell-fill" : "",
-                                cell.event ? `pattern-cell-${cell.event.hit_type}` : "",
-                                cell.event && !isEditGridEnabled ? "pattern-cell-readonly" : "",
-                                slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
-                                slotIndex % 2 === 0 ? "pattern-cell-even" : "",
-                                quarterSize > 0 && slotIndex % quarterSize === 0 ? "pattern-cell-quarter" : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" ");
-
-                              return (
-                                <div
-                                  key={`${row.instrument}-${barIndex}-${slotIndex}`}
-                                  className={className}
-                                  style={style}
-                                  onClick={() => void handleGridCellClick(row.instrument, barIndex, slotIndex, cell.event)}
-                                  draggable={Boolean(cell.event) && !isEditingPattern && isEditGridEnabled}
-                                  onDragStart={() => {
-                                    if (!cell.event || !isEditGridEnabled) {
-                                      return;
-                                    }
-                                    setDragState({
-                                      instrument: row.instrument,
-                                      bar: barIndex,
-                                      slot: slotIndex,
-                                      hitType: cell.event.hit_type,
-                                    });
-                                  }}
-                                  onDragOver={(dragEvent) => {
-                                    if (isEditGridEnabled && dragState?.instrument === row.instrument) {
-                                      dragEvent.preventDefault();
-                                    }
-                                  }}
-                                  onDrop={(dragEvent) => {
-                                    dragEvent.preventDefault();
-                                    void handleGridDrop(row.instrument, barIndex, slotIndex);
-                                  }}
-                                  onDragEnd={() => {
-                                    setDragState(null);
-                                  }}
-                                  role="button"
-                                  tabIndex={0}
-                                  title={
-                                    cell.event
-                                      ? `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1} | ${cell.event.hit_type} | velocity ${cell.event.velocity} | offset ${cell.event.offset}`
-                                      : `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1}`
+                            return (
+                              <div
+                                key={`${row.instrument}-${barIndex}-${slotIndex}`}
+                                className={className}
+                                style={style}
+                                onClick={() => void handleGridCellClick(row.instrument, barIndex, slotIndex, cell.event)}
+                                draggable={Boolean(cell.event) && !isEditingPattern && isEditGridEnabled}
+                                onDragStart={() => {
+                                  if (!cell.event || !isEditGridEnabled) {
+                                    return;
                                   }
-                                >
-                                  {cell.event && cell.event.offset !== 0 ? (
-                                    <span
-                                      className={`pattern-offset pattern-offset-${cell.event.offset < 0 ? "left" : "right"}`}
-                                    >
-                                      {Math.abs(cell.event.offset)}
-                                    </span>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ))}
-                      </div>
+                                  setDragState({
+                                    instrument: row.instrument,
+                                    bar: barIndex,
+                                    slot: slotIndex,
+                                    hitType: cell.event.hit_type,
+                                  });
+                                }}
+                                onDragOver={(dragEvent) => {
+                                  if (isEditGridEnabled && dragState?.instrument === row.instrument) {
+                                    dragEvent.preventDefault();
+                                  }
+                                }}
+                                onDrop={(dragEvent) => {
+                                  dragEvent.preventDefault();
+                                  void handleGridDrop(row.instrument, barIndex, slotIndex);
+                                }}
+                                onDragEnd={() => {
+                                  setDragState(null);
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                title={
+                                  cell.event
+                                    ? `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1} | ${cell.event.hit_type} | velocity ${cell.event.velocity} | offset ${cell.event.offset}`
+                                    : `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1}`
+                                }
+                              >
+                                {cell.event && cell.event.offset !== 0 ? (
+                                  <span
+                                    className={`pattern-offset pattern-offset-${cell.event.offset < 0 ? "left" : "right"}`}
+                                  >
+                                    {Math.abs(cell.event.offset)}
+                                  </span>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
-            ) : (
-              <div
-                className="pattern-grid-scroll pattern-grid-scroll-placeholder pattern-grid-scroll-locked"
-                onWheel={handlePatternGridWheel}
-              >
-                <div className="pattern-grid">
-                  {placeholderGridRows.map((row) => (
-                    <div key={row.instrument} className="pattern-row pattern-row-placeholder">
-                      <div className="pattern-row-label">
-                        <button type="button" className="pattern-row-lock" disabled aria-label={`Lock ${row.label}`}>
-                          <LockIcon locked={false} />
-                        </button>
-                        <span>{row.label}</span>
-                      </div>
-
-                      <div className="pattern-row-bars">
-                        {row.bars.map((bar, barIndex) => (
-                          <div
-                            key={`${row.instrument}-${barIndex}`}
-                            className="pattern-bar pattern-bar-placeholder"
-                            style={{ gridTemplateColumns: "repeat(32, minmax(21px, 1fr))" }}
-                          >
-                            {bar.map((_, slotIndex) => {
-                              const className = [
-                                "pattern-cell",
-                                "pattern-cell-placeholder",
-                                slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
-                                slotIndex % 2 === 0 ? "pattern-cell-even" : "",
-                                slotIndex % 8 === 0 ? "pattern-cell-quarter" : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" ");
-
-                              return <div key={`${row.instrument}-${barIndex}-${slotIndex}`} className={className} aria-hidden="true" />;
-                            })}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            </div>
           </section>
         </section>
       </form>

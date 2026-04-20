@@ -256,6 +256,7 @@ type PatternCellEditInput = {
   instrument: string;
   bar: number;
   slot: number;
+  context?: GenerateMidiInput;
 };
 
 type PatternMoveEditInput = {
@@ -266,6 +267,7 @@ type PatternMoveEditInput = {
   to_bar: number;
   to_slot: number;
   hit_type: "main" | "accent" | "ghost";
+  context?: GenerateMidiInput;
 };
 
 type PatternGenerateGhostsInput = {
