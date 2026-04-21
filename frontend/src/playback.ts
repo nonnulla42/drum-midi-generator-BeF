@@ -75,6 +75,11 @@ type ScheduledEvent = {
   sampleFilename: string;
 };
 
+type LoopBoundaryUpdate = {
+  pattern?: GeneratedPattern;
+  bpmOverride?: number;
+};
+
 function slotToTicks(slotIndex: number, swing: number): number {
   let ticks = slotIndex * TICKS_PER_SLOT;
   if (slotIndex % 2 === 1 && swing > 0) {
@@ -177,6 +182,7 @@ export class PatternPlayer {
   private currentPattern: GeneratedPattern | null = null;
   private currentBpmOverride: number | null = null;
   private isPlaying = false;
+  private loopBoundaryHandler: (() => LoopBoundaryUpdate | void) | null = null;
 
   async play(pattern: GeneratedPattern, loopEnabled: boolean, bpmOverride?: number): Promise<void> {
     const context = this.ensureAudioContext();
@@ -240,9 +246,13 @@ export class PatternPlayer {
       const elapsed = performance.now() - this.startTimestamp;
       const remaining = Math.max(0, this.loopDurationMs - elapsed);
       this.loopTimer = window.setTimeout(() => {
-        void this.restart();
+        void this.handleLoopRestart();
       }, remaining);
     }
+  }
+
+  setLoopBoundaryHandler(handler: (() => LoopBoundaryUpdate | void) | null): void {
+    this.loopBoundaryHandler = handler;
   }
 
   private ensureAudioContext(): AudioContext {
@@ -310,9 +320,25 @@ export class PatternPlayer {
 
     if (this.loopEnabled) {
       this.loopTimer = window.setTimeout(() => {
-        void this.restart();
+        void this.handleLoopRestart();
       }, this.loopDurationMs);
     }
+  }
+
+  private async handleLoopRestart(): Promise<void> {
+    if (!this.isPlaying || !this.loopEnabled) {
+      return;
+    }
+
+    const update = this.loopBoundaryHandler?.();
+    if (update?.pattern) {
+      this.currentPattern = update.pattern;
+    }
+    if (update?.bpmOverride !== undefined) {
+      this.currentBpmOverride = update.bpmOverride;
+    }
+
+    await this.restart(this.currentBpmOverride ?? undefined);
   }
 
   private async playEvent(event: ScheduledEvent): Promise<void> {
