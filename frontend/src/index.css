@@ -3273,6 +3273,7 @@ button:disabled {
   align-items: center;
   gap: 8px;
   padding-right: 6px;
+  min-width: 0;
   font-size: 0.78rem;
   font-weight: 700;
   text-transform: uppercase;
@@ -3283,28 +3284,57 @@ button:disabled {
   box-shadow: 10px 0 10px rgba(12, 18, 28, 0.9);
 }
 
+.pattern-row-name {
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .pattern-row-status {
   margin-left: auto;
-  padding: 2px 7px;
+  padding: 1px 2px;
   border-radius: 999px;
-  font-size: 0.58rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-size: 0.56rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  border: 1px solid rgba(122, 139, 170, 0.24);
+  border: 0px solid rgba(122, 139, 170, 0.24);
   background: rgba(18, 26, 40, 0.78);
+}
+
+.pattern-row-status-inline {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: 0;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pattern-row-status-dirty {
   color: #f5c992;
   border-color: rgba(245, 201, 146, 0.34);
-  background: rgba(84, 54, 22, 0.32);
+  background: rgba(143, 74, 0, 0.32);
 }
 
-.pattern-row-status-queued {
+.pattern-row-status-updating {
   color: #8ee1cf;
   border-color: rgba(142, 225, 207, 0.34);
   background: rgba(18, 72, 68, 0.28);
+  animation: pattern-row-status-pulse 1s ease-in-out infinite;
+}
+
+@keyframes pattern-row-status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(102, 224, 200, 0.08);
+    opacity: 0.84;
+  }
+
+  50% {
+    box-shadow: 0 0 0 4px rgba(102, 224, 200, 0.14);
+    opacity: 1;
+  }
 }
 
 .pattern-row-lock {

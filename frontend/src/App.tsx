@@ -243,9 +243,11 @@ type PendingGridEdit =
     };
 
 type InstrumentStatus = {
-  kind: "dirty" | "queued";
+  kind: "dirty" | "updating";
   label: string;
 };
+
+const GHOST_LAYER_INSTRUMENTS = ["snare", "hihat_closed", "ride"] as const satisfies readonly InstrumentId[];
 
 function setInstrumentQueuedState(current: InstrumentId[], instrument: InstrumentId, enabled: boolean): InstrumentId[] {
   const alreadyIncluded = current.includes(instrument);
@@ -257,6 +259,34 @@ function setInstrumentQueuedState(current: InstrumentId[], instrument: Instrumen
   return INSTRUMENT_IDS.filter((candidate) => next.includes(candidate));
 }
 
+function slotKey(bar: number, slot: number): string {
+  return `${bar}:${slot}`;
+}
+
+function buildFillSlotLookup(pattern: GeneratedPattern): Set<string> {
+  return new Set(pattern.fill_regions.flatMap((region) => region.slots.map((slot) => slotKey(region.bar, slot))));
+}
+
+function buildVisibleSlotLookup(events: PatternEvent[]): Set<string> {
+  return new Set(events.filter((event) => event.hit_type !== "ghost").map((event) => slotKey(event.bar, event.slot)));
+}
+
+function buildQueuedUpdateKey(
+  queuedEdits: PendingGridEdit[],
+  executiveInstruments: InstrumentId[],
+  regenerationInstruments: InstrumentId[],
+  ghostRequestCount: number,
+): string {
+  const editKey = queuedEdits
+    .map((edit) =>
+      edit.kind === "toggle"
+        ? `t:${edit.instrument}:${edit.bar}:${edit.slot}:${edit.hasVisibleEvent ? 1 : 0}`
+        : `m:${edit.instrument}:${edit.fromBar}:${edit.fromSlot}:${edit.toBar}:${edit.toSlot}:${edit.hitType}`,
+    )
+    .join("|");
+  return `${executiveInstruments.join(",")}::${regenerationInstruments.join(",")}::${ghostRequestCount}::${editKey}`;
+}
+
 function mergeSelectedInstrumentEvents(
   basePattern: GeneratedPattern,
   nextPattern: GeneratedPattern,
@@ -266,9 +296,23 @@ function mergeSelectedInstrumentEvents(
     return basePattern;
   }
 
+  const fillSlots = buildFillSlotLookup(basePattern);
+  const instrumentSet = new Set(instruments);
+  const fixedSnareSlots = instrumentSet.has("snare") ? new Set<string>() : buildVisibleSlotLookup(basePattern.events.snare ?? []);
+  const fixedKickSlots = instrumentSet.has("kick") ? new Set<string>() : buildVisibleSlotLookup(basePattern.events.kick ?? []);
   const mergedEvents = { ...basePattern.events };
   for (const instrument of instruments) {
-    mergedEvents[instrument] = sortPatternEvents([...(nextPattern.events[instrument] ?? [])]);
+    const preservedFillEvents = (basePattern.events[instrument] ?? []).filter((event) => fillSlots.has(slotKey(event.bar, event.slot)));
+    let nextEvents = (nextPattern.events[instrument] ?? []).filter((event) => !fillSlots.has(slotKey(event.bar, event.slot)));
+
+    if (instrument === "kick" && !instrumentSet.has("snare")) {
+      nextEvents = nextEvents.filter((event) => event.hit_type === "ghost" || !fixedSnareSlots.has(slotKey(event.bar, event.slot)));
+    }
+    if (instrument === "snare" && !instrumentSet.has("kick")) {
+      nextEvents = nextEvents.filter((event) => event.hit_type === "ghost" || !fixedKickSlots.has(slotKey(event.bar, event.slot)));
+    }
+
+    mergedEvents[instrument] = sortPatternEvents([...preservedFillEvents, ...nextEvents]);
   }
 
   return {
@@ -1817,6 +1861,8 @@ function App() {
   const [pendingRegenerationInstruments, setPendingRegenerationInstruments] = useState<InstrumentId[]>([]);
   const [pendingExecutiveInstruments, setPendingExecutiveInstruments] = useState<InstrumentId[]>([]);
   const [pendingGridEdits, setPendingGridEdits] = useState<PendingGridEdit[]>([]);
+  const [pendingGhostRegenerationCount, setPendingGhostRegenerationCount] = useState(0);
+  const [queuedLoopDelayRemaining, setQueuedLoopDelayRemaining] = useState(0);
   const [pendingStructureChange, setPendingStructureChange] = useState<{
     nextBars: number;
     nextGroupingRaw: string;
@@ -1835,6 +1881,9 @@ function App() {
   const pendingRegenerationRef = useRef<InstrumentId[]>([]);
   const pendingExecutiveRef = useRef<InstrumentId[]>([]);
   const pendingGridEditsRef = useRef<PendingGridEdit[]>([]);
+  const pendingGhostRegenerationCountRef = useRef(0);
+  const queuedLoopDelayRemainingRef = useRef(0);
+  const queuedLoopDelayKeyRef = useRef<string | null>(null);
   const previousLockedInstrumentsRef = useRef<InstrumentId[]>([]);
   const rebuildRequestIdRef = useRef(0);
   const suppressInstrumentSyncRef = useRef(false);
@@ -1875,6 +1924,14 @@ function App() {
   );
   const currentInstrumentSnapshots = buildCurrentInstrumentSnapshots();
   const currentGlobalContext = buildCurrentGlobalContext();
+  const pendingGhostInstruments = getGhostTargetInstruments();
+  const liveUpdatingInstruments = INSTRUMENT_IDS.filter(
+    (instrument) =>
+      pendingGridEditInstruments.includes(instrument) ||
+      pendingExecutiveInstruments.includes(instrument) ||
+      pendingRegenerationInstruments.includes(instrument) ||
+      (pendingGhostRegenerationCount > 0 && pendingGhostInstruments.includes(instrument)),
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -1930,6 +1987,8 @@ function App() {
     pendingRegenerationRef.current = pendingRegenerationInstruments;
     pendingExecutiveRef.current = pendingExecutiveInstruments;
     pendingGridEditsRef.current = pendingGridEdits;
+    pendingGhostRegenerationCountRef.current = pendingGhostRegenerationCount;
+    queuedLoopDelayRemainingRef.current = queuedLoopDelayRemaining;
 
     if (!renderedInstrumentSnapshotsRef.current) {
       renderedInstrumentSnapshotsRef.current = currentInstrumentSnapshots;
@@ -1943,9 +2002,11 @@ function App() {
   }, [
     currentInstrumentSnapshots,
     currentGlobalContext,
+    pendingGhostRegenerationCount,
     pendingExecutiveInstruments,
     pendingGridEdits,
     pendingRegenerationInstruments,
+    queuedLoopDelayRemaining,
   ]);
 
   useEffect(() => {
@@ -1977,19 +2038,32 @@ function App() {
     const player = getPatternPlayer();
     player.setLoopBoundaryHandler(() => {
       const preparedPattern = preparedLoopPatternRef.current;
+      if (queuedLoopDelayRemainingRef.current > 0) {
+        const nextRemaining = Math.max(0, queuedLoopDelayRemainingRef.current - 1);
+        queuedLoopDelayRemainingRef.current = nextRemaining;
+        setQueuedLoopDelayRemaining(nextRemaining);
+        return;
+      }
+
       if (!preparedPattern) {
         return;
       }
 
       preparedLoopPatternRef.current = null;
+      queuedLoopDelayKeyRef.current = null;
       setCommittedPattern(preparedPattern);
       updateRenderedInstrumentSnapshots([
         ...pendingExecutiveRef.current,
         ...pendingRegenerationRef.current,
       ]);
+      if (pendingGhostRegenerationCountRef.current > 0) {
+        setGhostRerollCount((current) => current + pendingGhostRegenerationCountRef.current);
+      }
       setPendingGridEdits([]);
       setPendingExecutiveInstruments([]);
       setPendingRegenerationInstruments([]);
+      setPendingGhostRegenerationCount(0);
+      setQueuedLoopDelayRemaining(0);
       setNeedsRegenerationInstruments((current) =>
         current.filter(
           (instrument) =>
@@ -2088,15 +2162,36 @@ function App() {
     if (playbackStatus !== "Playing") {
       preparedLoopPatternRef.current = null;
       rebuildRequestIdRef.current += 1;
+      queuedLoopDelayKeyRef.current = null;
+      queuedLoopDelayRemainingRef.current = 0;
+      setQueuedLoopDelayRemaining(0);
       return;
     }
 
     const hasQueuedChanges =
-      pendingGridEdits.length > 0 || pendingExecutiveInstruments.length > 0 || pendingRegenerationInstruments.length > 0;
+      pendingGridEdits.length > 0 ||
+      pendingExecutiveInstruments.length > 0 ||
+      pendingRegenerationInstruments.length > 0 ||
+      pendingGhostRegenerationCount > 0;
     if (!hasQueuedChanges) {
       preparedLoopPatternRef.current = null;
       rebuildRequestIdRef.current += 1;
+      queuedLoopDelayKeyRef.current = null;
+      queuedLoopDelayRemainingRef.current = 0;
+      setQueuedLoopDelayRemaining(0);
       return;
+    }
+
+    const queuedUpdateKey = buildQueuedUpdateKey(
+      pendingGridEdits,
+      pendingExecutiveInstruments,
+      pendingRegenerationInstruments,
+      pendingGhostRegenerationCount,
+    );
+    if (queuedLoopDelayKeyRef.current !== queuedUpdateKey) {
+      queuedLoopDelayKeyRef.current = queuedUpdateKey;
+      queuedLoopDelayRemainingRef.current = 1;
+      setQueuedLoopDelayRemaining(1);
     }
 
     const requestId = rebuildRequestIdRef.current + 1;
@@ -2110,6 +2205,7 @@ function App() {
           pendingExecutiveInstruments,
           pendingRegenerationInstruments,
           currentInstrumentSnapshots,
+          pendingGhostRegenerationCount,
         );
 
         if (requestId !== rebuildRequestIdRef.current) {
@@ -2129,6 +2225,7 @@ function App() {
     void rebuildLoopPattern();
   }, [
     currentInstrumentSnapshots,
+    pendingGhostRegenerationCount,
     pendingExecutiveInstruments,
     pendingGridEdits,
     pendingRegenerationInstruments,
@@ -2546,6 +2643,18 @@ function App() {
     };
   }
 
+  function getGhostTargetInstruments(): InstrumentId[] {
+    return GHOST_LAYER_INSTRUMENTS.filter((instrument) => {
+      if (instrument === "snare") {
+        return snareEnabled && snareGhostEnabled;
+      }
+      if (instrument === "hihat_closed") {
+        return hihatClosedEnabled && hihatClosedGhostEnabled;
+      }
+      return rideEnabled && rideGhostEnabled;
+    });
+  }
+
   function updateRenderedInstrumentSnapshots(
     instruments: InstrumentId[],
     mode: "full" | "executive" = "full",
@@ -2573,9 +2682,13 @@ function App() {
   function clearQueuedLoopChanges() {
     preparedLoopPatternRef.current = null;
     rebuildRequestIdRef.current += 1;
+    queuedLoopDelayKeyRef.current = null;
+    queuedLoopDelayRemainingRef.current = 0;
     setPendingGridEdits([]);
     setPendingExecutiveInstruments([]);
     setPendingRegenerationInstruments([]);
+    setPendingGhostRegenerationCount(0);
+    setQueuedLoopDelayRemaining(0);
   }
 
   function updateQueuedInstrumentState(
@@ -2666,6 +2779,30 @@ function App() {
     };
   }
 
+  function buildGhostGenerationInput(basePattern: GeneratedPattern, requestCount: number) {
+    return {
+      pattern: basePattern,
+      seed: seed === "random" ? undefined : seed + ghostRerollCount + requestCount,
+      snare_enabled: snareEnabled,
+      snare_ghost_enabled: snareGhostEnabled,
+      snare_ghost_density: snareGhostDensity,
+      snare_ghost_velocity: snareGhostVelocity,
+      snare_ghost_placement: snareGhostPlacement,
+      hihat_closed_enabled: hihatClosedEnabled,
+      hihat_closed_division: hihatClosedDivision,
+      hihat_closed_ghost_enabled: hihatClosedGhostEnabled,
+      hihat_closed_ghost_density: hihatClosedGhostDensity,
+      hihat_closed_ghost_velocity: hihatClosedGhostVelocity,
+      hihat_closed_ghost_placement: hihatClosedGhostPlacement,
+      ride_enabled: rideEnabled,
+      ride_division: rideDivision,
+      ride_ghost_enabled: rideGhostEnabled,
+      ride_ghost_density: rideGhostDensity,
+      ride_ghost_velocity: rideGhostVelocity,
+      ride_ghost_placement: rideGhostPlacement,
+    };
+  }
+
   async function regenerateSelectedInstruments(
     basePattern: GeneratedPattern,
     instruments: InstrumentId[],
@@ -2739,6 +2876,14 @@ function App() {
     return nextPattern;
   }
 
+  async function applyGhostRegeneration(basePattern: GeneratedPattern, requestCount: number): Promise<GeneratedPattern> {
+    if (requestCount <= 0) {
+      return basePattern;
+    }
+
+    return generatePatternGhosts(buildGhostGenerationInput(basePattern, requestCount));
+  }
+
   async function materializeQueuedPattern(
     basePattern: GeneratedPattern,
     queuedEdits: PendingGridEdit[] = pendingGridEditsRef.current,
@@ -2746,6 +2891,7 @@ function App() {
     regenerationInstruments: InstrumentId[] = pendingRegenerationRef.current,
     snapshots: Record<InstrumentId, InstrumentControlSnapshot> = latestInstrumentSnapshotsRef.current ??
       buildCurrentInstrumentSnapshots(),
+    ghostRequestCount = pendingGhostRegenerationCountRef.current,
   ): Promise<GeneratedPattern> {
     let nextPattern = basePattern;
     if (queuedEdits.length > 0) {
@@ -2757,6 +2903,9 @@ function App() {
     if (regenerationInstruments.length > 0) {
       nextPattern = await regenerateSelectedInstruments(nextPattern, regenerationInstruments);
     }
+    if (ghostRequestCount > 0) {
+      nextPattern = await applyGhostRegeneration(nextPattern, ghostRequestCount);
+    }
     return nextPattern;
   }
 
@@ -2767,23 +2916,18 @@ function App() {
 
   function getInstrumentStatus(instrument: InstrumentId | InstrumentId[]): InstrumentStatus | null {
     const targets = Array.isArray(instrument) ? instrument : [instrument];
-    const hasQueuedUpdate = targets.some(
-      (target) =>
-        pendingGridEditInstruments.includes(target) ||
-        pendingExecutiveInstruments.includes(target) ||
-        pendingRegenerationInstruments.includes(target),
-    );
+    const hasQueuedUpdate = targets.some((target) => liveUpdatingInstruments.includes(target));
     if (hasQueuedUpdate) {
       return {
-        kind: "queued",
-        label: "updates next loop",
+        kind: "updating",
+        label: "updating",
       };
     }
 
     if (targets.some((target) => needsRegenerationInstruments.includes(target))) {
       return {
         kind: "dirty",
-        label: "needs regeneration",
+        label: "Will update on Play",
       };
     }
 
@@ -2792,13 +2936,15 @@ function App() {
 
   function playbackStatusDetail(): string {
     if (playbackStatus === "Playing") {
-      const queuedCount =
-        pendingGridEditInstruments.length + pendingExecutiveInstruments.length + pendingRegenerationInstruments.length;
-      return queuedCount > 0 ? "Queued changes will land on the next loop." : "Live edits wait for the next loop.";
+      return liveUpdatingInstruments.length > 0
+        ? queuedLoopDelayRemaining > 0
+          ? "Updating instruments are staging for one safety loop."
+          : "Updating instruments will land at the next loop boundary."
+        : "Live edits stage until the loop boundary.";
     }
 
     return needsRegenerationInstruments.length > 0
-      ? "Play will sync only the instruments marked for regeneration."
+      ? "Press Play to sync only the instruments marked to update."
       : "Stopped mode applies executive changes immediately.";
   }
 
@@ -3039,32 +3185,17 @@ function App() {
     }
 
     setGenerateError("");
+    if (playbackStatus === "Playing") {
+      setPendingGhostRegenerationCount((current) => current + 1);
+      trackEvent("generate_ghosts", buildAnalyticsPayload());
+      return;
+    }
+
     setIsGeneratingGhosts(true);
 
     try {
-      stopPlaybackStatefully();
       clearQueuedLoopChanges();
-      const nextPattern = await generatePatternGhosts({
-        pattern: currentPattern,
-        seed: seed === "random" ? undefined : seed + ghostRerollCount + 1,
-        snare_enabled: snareEnabled,
-        snare_ghost_enabled: snareGhostEnabled,
-        snare_ghost_density: snareGhostDensity,
-        snare_ghost_velocity: snareGhostVelocity,
-        snare_ghost_placement: snareGhostPlacement,
-        hihat_closed_enabled: hihatClosedEnabled,
-        hihat_closed_division: hihatClosedDivision,
-        hihat_closed_ghost_enabled: hihatClosedGhostEnabled,
-        hihat_closed_ghost_density: hihatClosedGhostDensity,
-        hihat_closed_ghost_velocity: hihatClosedGhostVelocity,
-        hihat_closed_ghost_placement: hihatClosedGhostPlacement,
-        ride_enabled: rideEnabled,
-        ride_division: rideDivision,
-        ride_ghost_enabled: rideGhostEnabled,
-        ride_ghost_density: rideGhostDensity,
-        ride_ghost_velocity: rideGhostVelocity,
-        ride_ghost_placement: rideGhostPlacement,
-      });
+      const nextPattern = await generatePatternGhosts(buildGhostGenerationInput(currentPattern, 1));
       suppressInstrumentSyncRef.current = true;
       setCommittedPattern(nextPattern);
       setGhostRerollCount((current) => current + 1);
@@ -3121,7 +3252,8 @@ function App() {
       if (
         pendingGridEditsRef.current.length > 0 ||
         pendingExecutiveRef.current.length > 0 ||
-        pendingRegenerationRef.current.length > 0
+        pendingRegenerationRef.current.length > 0 ||
+        pendingGhostRegenerationCountRef.current > 0
       ) {
         suppressInstrumentSyncRef.current = true;
         setCommittedPattern(nextPattern);
@@ -3129,6 +3261,9 @@ function App() {
           ...pendingExecutiveRef.current,
           ...pendingRegenerationRef.current,
         ]);
+        if (pendingGhostRegenerationCountRef.current > 0) {
+          setGhostRerollCount((current) => current + pendingGhostRegenerationCountRef.current);
+        }
       }
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to land queued changes.");
@@ -3159,7 +3294,8 @@ function App() {
         preparedLoopPatternRef.current ??
         (pendingGridEditsRef.current.length > 0 ||
         pendingExecutiveRef.current.length > 0 ||
-        pendingRegenerationRef.current.length > 0
+        pendingRegenerationRef.current.length > 0 ||
+        pendingGhostRegenerationCountRef.current > 0
           ? await materializeQueuedPattern(getPatternForCurrentStructure())
           : getPatternForCurrentStructure());
       if (playbackStatus !== "Playing" && needsRegenerationInstruments.length > 0) {
@@ -3177,7 +3313,8 @@ function App() {
         preparedLoopPatternRef.current ||
         pendingGridEditsRef.current.length > 0 ||
         pendingExecutiveRef.current.length > 0 ||
-        pendingRegenerationRef.current.length > 0
+        pendingRegenerationRef.current.length > 0 ||
+        pendingGhostRegenerationCountRef.current > 0
       ) {
         suppressInstrumentSyncRef.current = true;
         setCommittedPattern(currentPattern);
@@ -3185,6 +3322,9 @@ function App() {
           ...pendingExecutiveRef.current,
           ...pendingRegenerationRef.current,
         ]);
+        if (pendingGhostRegenerationCountRef.current > 0) {
+          setGhostRerollCount((current) => current + pendingGhostRegenerationCountRef.current);
+        }
         clearQueuedLoopChanges();
       }
       await getPatternPlayer().play(currentPattern, isLoopEnabled, bpm);
@@ -4410,7 +4550,10 @@ function App() {
               onWheel={handlePatternGridWheel}
             >
               <div className="pattern-grid">
-                {gridRows.map((row) => (
+                {gridRows.map((row) => {
+                  const rowStatus = getInstrumentStatus(row.instrument as InstrumentId);
+                  const hasRowStatus = Boolean(rowStatus);
+                  return (
                   <div key={row.instrument} className="pattern-row">
                     <div className="pattern-row-label">
                       <button
@@ -4424,12 +4567,12 @@ function App() {
                       >
                         <LockIcon locked={lockedInstruments.includes(row.instrument)} />
                       </button>
-                      <span>{row.label}</span>
-                      {getInstrumentStatus(row.instrument as InstrumentId) ? (
+                      {!hasRowStatus ? <span className="pattern-row-name">{row.label}</span> : null}
+                      {rowStatus ? (
                         <span
-                          className={`pattern-row-status pattern-row-status-${getInstrumentStatus(row.instrument as InstrumentId)?.kind}`}
+                          className={`pattern-row-status pattern-row-status-${rowStatus.kind} pattern-row-status-inline`}
                         >
-                          {getInstrumentStatus(row.instrument as InstrumentId)?.label}
+                          {rowStatus.label}
                         </span>
                       ) : null}
                     </div>
@@ -4512,7 +4655,8 @@ function App() {
                       ))}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </section>
