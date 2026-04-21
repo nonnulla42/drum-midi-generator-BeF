@@ -14,6 +14,7 @@ import {
   type PatternEvent,
   type Preset,
 } from "./api";
+import { trackEvent } from "./lib/analytics";
 import { PatternPlayer } from "./playback";
 
 const CUSTOM_PRESET_ID = "custom";
@@ -1987,6 +1988,16 @@ function App() {
     };
   }
 
+  function buildAnalyticsPayload() {
+    return {
+      bpm,
+      bars,
+      grouping: normalizeGrouping(groupingInput),
+      preset_id: selectedPreset === CUSTOM_PRESET_ID ? CUSTOM_PRESET_ID : selectedPreset,
+      edit_grid_active: isEditGridEnabled,
+    };
+  }
+
   function getPatternForCurrentStructure() {
     const activeGrouping = currentGroupingError ? grouping : normalizeGrouping(groupingInput);
     if (pattern.meta.bars === bars && pattern.meta.grouping === activeGrouping) {
@@ -2116,6 +2127,7 @@ function App() {
       setPattern(mergeLockedInstrumentEvents(currentPattern, nextPattern, lockedInstruments));
       setGhostRerollCount(0);
       lastGenerateSignatureRef.current = requestSignature;
+      trackEvent("generate_pattern", buildAnalyticsPayload());
       if (shouldShowFixedSeedWarning) {
         setSeedFixedWarningVisible(true);
         if (seedWarningTimeoutRef.current !== null) {
@@ -2159,6 +2171,7 @@ function App() {
       link.download = "ghostgroove.mid";
       document.body.appendChild(link);
       link.click();
+      trackEvent("export_midi", buildAnalyticsPayload());
       link.remove();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -2210,6 +2223,7 @@ function App() {
       });
       setPattern(nextPattern);
       setGhostRerollCount((current) => current + 1);
+      trackEvent("generate_ghosts", buildAnalyticsPayload());
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to generate ghost notes.");
     } finally {
@@ -2240,6 +2254,7 @@ function App() {
       }
       await getPatternPlayer().play(currentPattern, isLoopEnabled, bpm);
       setPlaybackStatus("Playing");
+      trackEvent("play_preview", buildAnalyticsPayload());
     } catch (error) {
       setIsGeneratingPattern(false);
       setGenerateError(error instanceof Error ? error.message : "Failed to start playback.");

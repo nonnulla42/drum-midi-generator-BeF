@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from fastapi import HTTPException
 from mido import MidiFile, bpm2tempo
+from pydantic import ValidationError
 
 from api import (
     GenerateRequest,
@@ -10,6 +11,7 @@ from api import (
     PatternGenerateGhostsRequest,
     PatternMoveRequest,
     PatternPayloadRequest,
+    TrackEventRequest,
     _delete_file,
     add_base_hit,
     export_midi,
@@ -19,6 +21,7 @@ from api import (
     move_hit,
     presets,
     remove_hit,
+    track_event,
 )
 
 
@@ -782,6 +785,26 @@ class ApiTests(unittest.TestCase):
 
         self.assertEqual(captured.exception.status_code, 400)
         self.assertEqual(captured.exception.detail, "Unknown preset: does not exist")
+
+    def test_track_accepts_allowed_event_names(self) -> None:
+        response = track_event(
+            TrackEventRequest(
+                event_name="generate_pattern",
+                payload={
+                    "bpm": 120,
+                    "bars": 2,
+                    "grouping": "3+2",
+                    "preset_id": "custom",
+                    "edit_grid_active": True,
+                },
+            )
+        )
+
+        self.assertEqual(response, {"accepted": True})
+
+    def test_track_rejects_unknown_event_names(self) -> None:
+        with self.assertRaises(ValidationError):
+            TrackEventRequest(event_name="page_view")
 
 
 if __name__ == "__main__":

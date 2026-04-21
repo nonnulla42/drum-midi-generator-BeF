@@ -1,12 +1,13 @@
+import logging
 import os
 import tempfile
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
@@ -17,6 +18,7 @@ from core.pattern import GlobalSettings
 from core.pattern_serialization import deserialize_pattern, serialize_pattern
 from core.presets import load_preset, preset_names
 from core.timing import parse_grouping
+
 
 def parse_cors_origins() -> list[str]:
     configured = os.getenv("BACKEND_CORS_ORIGINS", "")
@@ -35,6 +37,7 @@ def parse_cors_origins() -> list[str]:
 
 app = FastAPI()
 generator = DrumPatternGenerator()
+logger = logging.getLogger("ghostgroove.analytics")
 
 app.add_middleware(
     CORSMiddleware,
@@ -187,6 +190,11 @@ class PatternGenerateGhostsRequest(BaseModel):
     ride_ghost_placement: Literal["before", "after", "both"] | None = None
 
 
+class TrackEventRequest(BaseModel):
+    event_name: Literal["generate_pattern", "generate_ghosts", "play_preview", "export_midi"]
+    payload: dict[str, str | int | float | bool] | None = None
+
+
 @app.get("/")
 def root():
     return {"status": "ok", "message": "GhostGroove backend is running"}
@@ -300,6 +308,12 @@ def presets():
             }
         )
     return items
+
+
+@app.post("/track")
+def track_event(request: TrackEventRequest):
+    logger.info("Accepted analytics event %s payload=%s", request.event_name, request.payload or {})
+    return {"accepted": True}
 
 
 def _delete_file(path: str) -> None:
