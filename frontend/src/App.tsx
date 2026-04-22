@@ -1962,6 +1962,7 @@ function App() {
   const pendingGhostRegenerationCountRef = useRef(0);
   const queuedLoopDelayRemainingRef = useRef(0);
   const queuedLoopDelayKeyRef = useRef<string | null>(null);
+  const queuedRebuildTimeoutRef = useRef<number | null>(null);
   const previousLockedInstrumentsRef = useRef<InstrumentId[]>([]);
   const rebuildRequestIdRef = useRef(0);
   const suppressInstrumentSyncRef = useRef(false);
@@ -2050,6 +2051,9 @@ function App() {
   useEffect(() => {
     return () => {
       patternPlayerRef.current?.stop();
+      if (queuedRebuildTimeoutRef.current !== null) {
+        window.clearTimeout(queuedRebuildTimeoutRef.current);
+      }
       if (seedWarningTimeoutRef.current !== null) {
         window.clearTimeout(seedWarningTimeoutRef.current);
       }
@@ -2220,6 +2224,10 @@ function App() {
 
   useEffect(() => {
     if (playbackStatus !== "Playing") {
+      if (queuedRebuildTimeoutRef.current !== null) {
+        window.clearTimeout(queuedRebuildTimeoutRef.current);
+        queuedRebuildTimeoutRef.current = null;
+      }
       getPatternPlayer().clearQueuedLoopCommit();
       queuedSourcePatternRef.current = null;
       rebuildRequestIdRef.current += 1;
@@ -2236,6 +2244,10 @@ function App() {
       pendingRegenerationInstruments.length > 0 ||
       pendingGhostRegenerationCount > 0;
     if (!hasQueuedChanges) {
+      if (queuedRebuildTimeoutRef.current !== null) {
+        window.clearTimeout(queuedRebuildTimeoutRef.current);
+        queuedRebuildTimeoutRef.current = null;
+      }
       if (!hasQueuedPlaybackCommit) {
         getPatternPlayer().clearQueuedLoopCommit();
         queuedSourcePatternRef.current = null;
@@ -2262,6 +2274,7 @@ function App() {
 
     const requestId = rebuildRequestIdRef.current + 1;
     rebuildRequestIdRef.current = requestId;
+    const rebuildDelayMs = pendingGridEdits.length > 0 ? 90 : 0;
 
     async function rebuildLoopPattern() {
       try {
@@ -2333,7 +2346,20 @@ function App() {
       }
     }
 
-    void rebuildLoopPattern();
+    if (queuedRebuildTimeoutRef.current !== null) {
+      window.clearTimeout(queuedRebuildTimeoutRef.current);
+    }
+    queuedRebuildTimeoutRef.current = window.setTimeout(() => {
+      queuedRebuildTimeoutRef.current = null;
+      void rebuildLoopPattern();
+    }, rebuildDelayMs);
+
+    return () => {
+      if (queuedRebuildTimeoutRef.current !== null) {
+        window.clearTimeout(queuedRebuildTimeoutRef.current);
+        queuedRebuildTimeoutRef.current = null;
+      }
+    };
   }, [
     currentInstrumentSnapshots,
     pendingGhostRegenerationCount,
@@ -2798,6 +2824,10 @@ function App() {
   }
 
   function clearQueuedLoopChanges() {
+    if (queuedRebuildTimeoutRef.current !== null) {
+      window.clearTimeout(queuedRebuildTimeoutRef.current);
+      queuedRebuildTimeoutRef.current = null;
+    }
     getPatternPlayer().clearQueuedLoopCommit();
     queuedSourcePatternRef.current = null;
     rebuildRequestIdRef.current += 1;
