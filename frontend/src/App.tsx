@@ -3404,8 +3404,14 @@ function App() {
       <form className="app-layout" onSubmit={handleGeneratePattern}>
         <aside className="sidebar card">
           <header className="hero">
-            <h1>GhostGroove</h1>
-            <p>generate drum MIDI from musical presets</p>
+            <div className="hero-copy">
+              <h1>GhostGroove</h1>
+              <p>generate drum MIDI from musical presets</p>
+            </div>
+
+            <div className="hero-logo" aria-hidden="true">
+              <img src="/logo.svg" alt="" className="hero-logo-mark" />
+            </div>
           </header>
 
           <div className="sidebar-form">
