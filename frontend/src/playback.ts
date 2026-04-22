@@ -484,7 +484,7 @@ export class PatternPlayer {
       const sources = this.activeSources.get(chokeGroup) ?? [];
       for (const source of sources) {
         try {
-          source.stop();
+          source.stop(startTimeSec);
         } catch {
           // Ignore already-stopped nodes.
         }

@@ -306,6 +306,7 @@ summary {
   align-items: center;
   justify-content: flex-end;
   overflow: visible;
+  pointer-events: none;
 }
 
 .hero-logo::before {
@@ -313,8 +314,8 @@ summary {
   position: absolute;
   top: 50%;
   right: -20px;
-  width: 180px;
-  height: 18px;
+  width: 10px;
+  height: 24px;
   transform: translateY(-50%);
   border-radius: 999px;
   background:
@@ -334,6 +335,7 @@ summary {
   transform: translateX(167px);
   position: relative;
   z-index: 1;
+  pointer-events: none;
   filter:
     brightness(1.1)
     contrast(1.08)
@@ -1547,14 +1549,13 @@ summary {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--accent-primary);
-  text-shadow: 0 0 10px rgba(104, 240, 154, 0.12);
+  color: var(--text-secondary);
 }
 
 .playback-status-detail {
   font-size: 0.72rem;
   letter-spacing: 0.02em;
-  color: rgba(104, 240, 154, 0.86);
+  color: rgba(187, 197, 219, 0.78);
 }
 
 .action-group {
