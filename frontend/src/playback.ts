@@ -90,6 +90,8 @@ type CompiledLoop = {
   events: CompiledLoopEvent[];
   durationSec: number;
   bpm: number;
+  slotStartTimesSec: number[];
+  totalSlots: number;
 };
 
 type TransportRuntime = {
@@ -110,6 +112,10 @@ type QueuedPlaybackCommit = {
 type QueuedPlaybackCommitState = {
   hasQueuedCommit: boolean;
   remainingSafetyLoops: number;
+};
+
+type PlaybackPositionState = {
+  currentAbsoluteSlot: number | null;
 };
 
 function slotToTicks(slotIndex: number, swing: number): number {
@@ -221,6 +227,8 @@ export class PatternPlayer {
   private isPlaying = false;
   private queuedPlaybackCommit: QueuedPlaybackCommit | null = null;
   private queuedPlaybackCommitStateHandler: ((state: QueuedPlaybackCommitState) => void) | null = null;
+  private playbackPositionStateHandler: ((state: PlaybackPositionState) => void) | null = null;
+  private lastEmittedPlaybackSlot: number | null = null;
 
   async play(pattern: GeneratedPattern, loopEnabled: boolean, bpmOverride?: number): Promise<void> {
     const context = this.ensureAudioContext();
@@ -241,6 +249,7 @@ export class PatternPlayer {
       scheduledThroughSec: startTime,
     };
     this.isPlaying = true;
+    this.emitPlaybackPositionState(0);
     this.startScheduler();
   }
 
@@ -277,6 +286,7 @@ export class PatternPlayer {
     this.compiledLiveLoop = null;
     this.runtime = null;
     this.isPlaying = false;
+    this.emitPlaybackPositionState(null);
   }
 
   setLoopEnabled(enabled: boolean): void {
@@ -315,6 +325,11 @@ export class PatternPlayer {
     this.emitQueuedPlaybackCommitState();
   }
 
+  setPlaybackPositionStateHandler(handler: ((state: PlaybackPositionState) => void) | null): void {
+    this.playbackPositionStateHandler = handler;
+    this.emitPlaybackPositionState(this.lastEmittedPlaybackSlot);
+  }
+
   private ensureAudioContext(): AudioContext {
     if (!this.audioContext) {
       this.audioContext = new AudioContext();
@@ -341,6 +356,10 @@ export class PatternPlayer {
   private async compileLoop(pattern: GeneratedPattern, bpmOverride?: number): Promise<CompiledLoop> {
     const events: CompiledLoopEvent[] = [];
     const playbackBpm = bpmOverride ?? pattern.meta.bpm;
+    const totalSlots = pattern.meta.slots_per_bar * pattern.meta.bars;
+    const slotStartTimesSec = Array.from({ length: totalSlots }, (_, slotIndex) =>
+      Math.max(0, ticksToMilliseconds(slotToTicks(slotIndex, pattern.meta.swing), playbackBpm) / 1000),
+    );
 
     for (const instrument of pattern.instrument_order) {
       for (const event of pattern.events[instrument] ?? []) {
@@ -365,6 +384,8 @@ export class PatternPlayer {
       events: events.sort((left, right) => left.timeInLoopSec - right.timeInLoopSec),
       durationSec: this.patternDurationMs(pattern, playbackBpm) / 1000,
       bpm: playbackBpm,
+      slotStartTimesSec,
+      totalSlots,
     };
   }
 
@@ -391,6 +412,8 @@ export class PatternPlayer {
     if (!context || !runtime || !compiledLoop || !runtime.isRunning || !this.isPlaying) {
       return;
     }
+
+    this.emitPlaybackPositionState(this.currentAbsoluteSlotForTime(context.currentTime, runtime, compiledLoop));
 
     const horizonSec = context.currentTime + PatternPlayer.SCHEDULER_CONFIG.lookaheadSec;
     while (runtime.scheduledThroughSec < horizonSec) {
@@ -447,6 +470,38 @@ export class PatternPlayer {
       hasQueuedCommit: this.queuedPlaybackCommit !== null,
       remainingSafetyLoops: this.queuedPlaybackCommit?.remainingSafetyLoops ?? 0,
     });
+  }
+
+  private emitPlaybackPositionState(currentAbsoluteSlot: number | null): void {
+    if (this.lastEmittedPlaybackSlot === currentAbsoluteSlot) {
+      return;
+    }
+
+    this.lastEmittedPlaybackSlot = currentAbsoluteSlot;
+    this.playbackPositionStateHandler?.({ currentAbsoluteSlot });
+  }
+
+  private currentAbsoluteSlotForTime(
+    currentTimeSec: number,
+    runtime: TransportRuntime,
+    compiledLoop: CompiledLoop,
+  ): number {
+    if (compiledLoop.totalSlots <= 0) {
+      return 0;
+    }
+
+    const elapsedInLoopSec = Math.min(
+      Math.max(0, currentTimeSec - runtime.loopStartAudioTimeSec),
+      Math.max(0, compiledLoop.durationSec - Number.EPSILON),
+    );
+
+    for (let slotIndex = compiledLoop.slotStartTimesSec.length - 1; slotIndex >= 0; slotIndex -= 1) {
+      if (elapsedInLoopSec >= compiledLoop.slotStartTimesSec[slotIndex]) {
+        return slotIndex;
+      }
+    }
+
+    return 0;
   }
 
   private async prepareQueuedCommit(commit: QueuedPlaybackCommit): Promise<void> {

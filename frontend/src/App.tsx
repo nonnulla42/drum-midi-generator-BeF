@@ -1921,6 +1921,7 @@ function App() {
   const [isEditGridEnabled, setIsEditGridEnabled] = useState(true);
   const [isLoopEnabled, setIsLoopEnabled] = useState(true);
   const [playbackStatus, setPlaybackStatus] = useState<"Stopped" | "Playing">("Stopped");
+  const [playbackActiveSlot, setPlaybackActiveSlot] = useState<number | null>(null);
   const [dragState, setDragState] = useState<{
     instrument: string;
     bar: number;
@@ -2126,6 +2127,17 @@ function App() {
 
     return () => {
       player.setQueuedPlaybackCommitStateHandler(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    const player = getPatternPlayer();
+    player.setPlaybackPositionStateHandler((state) => {
+      setPlaybackActiveSlot(state.currentAbsoluteSlot);
+    });
+
+    return () => {
+      player.setPlaybackPositionStateHandler(null);
     };
   }, []);
 
@@ -4751,6 +4763,7 @@ function App() {
                           style={{ gridTemplateColumns: `repeat(${pattern.meta.slots_per_bar}, minmax(21px, 1fr))` }}
                         >
                           {bar.map((cell, slotIndex) => {
+                            const absoluteSlot = barIndex * pattern.meta.slots_per_bar + slotIndex;
                             const numerator = numeratorFromGrouping(pattern.meta.grouping) ?? 4;
                             const quarterSize = pattern.meta.slots_per_bar / numerator;
                             const style =
@@ -4765,6 +4778,9 @@ function App() {
                               slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
                               slotIndex % 2 === 0 ? "pattern-cell-even" : "",
                               quarterSize > 0 && slotIndex % quarterSize === 0 ? "pattern-cell-quarter" : "",
+                              playbackStatus === "Playing" && playbackActiveSlot === absoluteSlot
+                                ? "pattern-cell-playhead"
+                                : "",
                             ]
                               .filter(Boolean)
                               .join(" ");
