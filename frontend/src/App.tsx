@@ -3266,6 +3266,11 @@ function App() {
   }
 
   function queueManualPlaybackPattern(nextPattern: GeneratedPattern, instruments: InstrumentId[]) {
+    if (queuedRebuildTimeoutRef.current !== null) {
+      window.clearTimeout(queuedRebuildTimeoutRef.current);
+      queuedRebuildTimeoutRef.current = null;
+    }
+    rebuildRequestIdRef.current += 1;
     queuedLoopDelayKeyRef.current = null;
     queuedLoopDelayRemainingRef.current = 0;
     setQueuedLoopDelayRemaining(0);
