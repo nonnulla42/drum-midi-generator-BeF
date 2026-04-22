@@ -249,6 +249,10 @@ type InstrumentStatus = {
 
 const GHOST_LAYER_INSTRUMENTS = ["snare", "hihat_closed", "ride"] as const satisfies readonly InstrumentId[];
 
+function createInstrumentCounterRecord(initialValue = 0): Record<InstrumentId, number> {
+  return Object.fromEntries(INSTRUMENT_IDS.map((instrument) => [instrument, initialValue])) as Record<InstrumentId, number>;
+}
+
 function setInstrumentQueuedState(current: InstrumentId[], instrument: InstrumentId, enabled: boolean): InstrumentId[] {
   const alreadyIncluded = current.includes(instrument);
   if (enabled === alreadyIncluded) {
@@ -391,6 +395,34 @@ function mergeSelectedInstrumentEvents(
 
   return {
     ...basePattern,
+    events: mergedEvents,
+  };
+}
+
+function mergePatternEventsForPublishedInstruments(
+  basePattern: GeneratedPattern,
+  nextPattern: GeneratedPattern,
+  publishedInstruments: InstrumentId[],
+): GeneratedPattern {
+  if (publishedInstruments.length === 0) {
+    return basePattern;
+  }
+
+  const mergedEvents = {
+    ...basePattern.events,
+  };
+
+  for (const instrument of publishedInstruments) {
+    mergedEvents[instrument] = nextPattern.events[instrument] ?? [];
+  }
+
+  return {
+    ...basePattern,
+    pattern_version: nextPattern.pattern_version,
+    bpm_override: nextPattern.bpm_override,
+    meta: nextPattern.meta,
+    instrument_order: nextPattern.instrument_order,
+    fill_regions: nextPattern.fill_regions,
     events: mergedEvents,
   };
 }
@@ -2152,6 +2184,7 @@ function App() {
   const queuedLoopDelayRemainingRef = useRef(0);
   const queuedLoopDelayKeyRef = useRef<string | null>(null);
   const queuedRebuildTimeoutRef = useRef<number | null>(null);
+  const manualPublishVersionRef = useRef<Record<InstrumentId, number>>(createInstrumentCounterRecord());
   const previousLockedInstrumentsRef = useRef<InstrumentId[]>([]);
   const rebuildRequestIdRef = useRef(0);
   const suppressInstrumentSyncRef = useRef(false);
@@ -2468,6 +2501,9 @@ function App() {
     const requestId = rebuildRequestIdRef.current + 1;
     rebuildRequestIdRef.current = requestId;
     const rebuildDelayMs = pendingGridEdits.length > 0 ? 90 : 0;
+    const regenerationPublishVersions = Object.fromEntries(
+      pendingRegenerationInstruments.map((instrument) => [instrument, manualPublishVersionRef.current[instrument]]),
+    ) as Partial<Record<InstrumentId, number>>;
 
     async function rebuildLoopPattern() {
       try {
@@ -2487,32 +2523,47 @@ function App() {
         const committedExecutiveInstruments = [...pendingExecutiveInstruments];
         const committedRegenerationInstruments = [...pendingRegenerationInstruments];
         const committedGhostRegenerationCount = pendingGhostRegenerationCount;
+        const allowedRegenerationInstruments = committedRegenerationInstruments.filter(
+          (instrument) => manualPublishVersionRef.current[instrument] === regenerationPublishVersions[instrument],
+        );
         const committedInstruments = INSTRUMENT_IDS.filter(
           (instrument) =>
             pendingGridEdits.some((edit) => edit.instrument === instrument) ||
             committedExecutiveInstruments.includes(instrument) ||
-            committedRegenerationInstruments.includes(instrument) ||
+            allowedRegenerationInstruments.includes(instrument) ||
             (committedGhostRegenerationCount > 0 && pendingGhostInstruments.includes(instrument)),
         );
-        queuedSourcePatternRef.current = nextPattern;
-        setQueuedCommitInstruments(committedInstruments);
+        if (committedInstruments.length === 0) {
+          return;
+        }
+
+        const publishBasePattern = queuedSourcePatternRef.current ?? patternRef.current;
+        const publishedPattern = mergePatternEventsForPublishedInstruments(
+          publishBasePattern,
+          nextPattern,
+          committedInstruments,
+        );
+        queuedSourcePatternRef.current = publishedPattern;
+        setQueuedCommitInstruments((current) =>
+          INSTRUMENT_IDS.filter((instrument) => current.includes(instrument) || committedInstruments.includes(instrument)),
+        );
         setPendingGridEdits([]);
         setPendingExecutiveInstruments([]);
         setPendingRegenerationInstruments([]);
         setPendingGhostRegenerationCount(0);
         getPatternPlayer().queueLoopCommit({
-          pattern: nextPattern,
+          pattern: publishedPattern,
           bpmOverride: bpm,
           remainingSafetyLoops: queuedLoopDelayRemainingRef.current,
           onApplied: () => {
             queuedLoopDelayKeyRef.current = null;
             queuedSourcePatternRef.current = null;
             suppressInstrumentSyncRef.current = true;
-            setCommittedPattern(nextPattern);
+            setCommittedPattern(publishedPattern);
             setQueuedCommitInstruments([]);
             updateRenderedInstrumentSnapshots([
               ...committedExecutiveInstruments,
-              ...committedRegenerationInstruments,
+              ...allowedRegenerationInstruments,
             ]);
             if (committedGhostRegenerationCount > 0) {
               setGhostRerollCount((current) => current + committedGhostRegenerationCount);
@@ -2521,7 +2572,7 @@ function App() {
               current.filter(
                 (instrument) =>
                   !committedExecutiveInstruments.includes(instrument) &&
-                  !committedRegenerationInstruments.includes(instrument),
+                  !allowedRegenerationInstruments.includes(instrument),
               ),
             );
           },
@@ -3271,6 +3322,9 @@ function App() {
       queuedRebuildTimeoutRef.current = null;
     }
     rebuildRequestIdRef.current += 1;
+    for (const instrument of instruments) {
+      manualPublishVersionRef.current[instrument] += 1;
+    }
     queuedLoopDelayKeyRef.current = null;
     queuedLoopDelayRemainingRef.current = 0;
     setQueuedLoopDelayRemaining(0);
