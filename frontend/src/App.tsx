@@ -643,6 +643,195 @@ function sortPatternEvents(events: PatternEvent[]): PatternEvent[] {
   });
 }
 
+function clampVelocityValue(value: number): number {
+  return clampNumber(value, 1, 127);
+}
+
+function velocityFromPriority(priority: number, velocityMin: number, velocityMax: number): number {
+  const clampedPriority = clampNumber(priority, 0, 1);
+  if (velocityMax <= velocityMin) {
+    return clampVelocityValue(velocityMin);
+  }
+  return clampVelocityValue(Math.round(velocityMin + (velocityMax - velocityMin) * clampedPriority));
+}
+
+function anyEventAtPatternCell(
+  pattern: GeneratedPattern,
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+): boolean {
+  return (pattern.events[instrument] ?? []).some((event) => event.bar === bar && event.slot === slot);
+}
+
+function visibleBaseEventAtPatternCell(
+  pattern: GeneratedPattern,
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+): PatternEvent | null {
+  const visibleEvents = (pattern.events[instrument] ?? [])
+    .filter((event) => event.bar === bar && event.slot === slot && event.hit_type !== "ghost")
+    .sort((left, right) => hitPriority(left.hit_type) - hitPriority(right.hit_type));
+
+  return visibleEvents[0] ?? null;
+}
+
+function ghostEventAtPatternCell(
+  pattern: GeneratedPattern,
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+): PatternEvent | null {
+  return (pattern.events[instrument] ?? []).find(
+    (event) => event.bar === bar && event.slot === slot && event.hit_type === "ghost",
+  ) ?? null;
+}
+
+function createManualBasePatternEvent(
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+  snapshot: InstrumentControlSnapshot,
+  globalContext: GlobalGenerationContext,
+): PatternEvent {
+  const priority = defaultVelocityPriority("main");
+  const baseVelocity = velocityFromPriority(priority, snapshot.velocityMin, snapshot.velocityMax);
+  const velocityHumanizeAmount = scaledHumanizeAmount(globalContext.humanizeVelocity);
+  const velocityDelta =
+    velocityHumanizeAmount > 0
+      ? deterministicRangeValue(
+          `manual-velocity:${instrument}:${bar}:${slot}:${snapshot.velocityMin}:${snapshot.velocityMax}`,
+          -velocityHumanizeAmount,
+          velocityHumanizeAmount,
+        )
+      : 0;
+  const velocity = clampNumber(
+    baseVelocity + velocityDelta,
+    clampVelocityValue(snapshot.velocityMin),
+    clampVelocityValue(snapshot.velocityMax),
+  );
+
+  const baseTimingAmount = scaledHumanizeAmount(globalContext.humanizeTiming);
+  const baseOffset =
+    baseTimingAmount > 0
+      ? deterministicRangeValue(`manual-timing:${instrument}:${bar}:${slot}`, -baseTimingAmount, baseTimingAmount)
+      : 0;
+  const timingPrototype: PatternEvent = {
+    bar,
+    slot,
+    hit_type: "main",
+    velocity,
+    offset: 0,
+    length_ticks: 70,
+    source: "manual",
+  };
+  const timingBias = timingFeelBiasForEvent(snapshot.timingFeel, baseTimingAmount, timingPrototype);
+  const offsetLimit = timingOffsetLimit(baseTimingAmount);
+  const offset = clampNumber(baseOffset + timingBias, -offsetLimit, offsetLimit);
+
+  return {
+    ...timingPrototype,
+    velocity,
+    offset,
+  };
+}
+
+function addManualBaseHitLocally(
+  pattern: GeneratedPattern,
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+  snapshot: InstrumentControlSnapshot,
+  globalContext: GlobalGenerationContext,
+): GeneratedPattern {
+  if (anyEventAtPatternCell(pattern, instrument, bar, slot)) {
+    return pattern;
+  }
+
+  return {
+    ...pattern,
+    events: {
+      ...pattern.events,
+      [instrument]: sortPatternEvents([
+        ...(pattern.events[instrument] ?? []),
+        createManualBasePatternEvent(instrument, bar, slot, snapshot, globalContext),
+      ]),
+    },
+  };
+}
+
+function removePatternHitLocally(
+  pattern: GeneratedPattern,
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+  hitType: PatternEvent["hit_type"],
+): GeneratedPattern {
+  const targetEvent =
+    hitType === "ghost"
+      ? ghostEventAtPatternCell(pattern, instrument, bar, slot)
+      : visibleBaseEventAtPatternCell(pattern, instrument, bar, slot);
+  if (!targetEvent) {
+    return pattern;
+  }
+
+  return {
+    ...pattern,
+    events: {
+      ...pattern.events,
+      [instrument]: (pattern.events[instrument] ?? []).filter((event) => event !== targetEvent),
+    },
+  };
+}
+
+function movePatternHitLocally(
+  pattern: GeneratedPattern,
+  instrument: InstrumentId,
+  fromBar: number,
+  fromSlot: number,
+  toBar: number,
+  toSlot: number,
+  hitType: PatternEvent["hit_type"],
+): GeneratedPattern {
+  if (fromBar === toBar && fromSlot === toSlot) {
+    return pattern;
+  }
+
+  const targetEvent =
+    hitType === "ghost"
+      ? ghostEventAtPatternCell(pattern, instrument, fromBar, fromSlot)
+      : visibleBaseEventAtPatternCell(pattern, instrument, fromBar, fromSlot);
+  if (!targetEvent) {
+    return pattern;
+  }
+
+  if (hitType === "ghost") {
+    if (hasVisibleEventAtPatternCell(pattern, instrument, toBar, toSlot) || ghostEventAtPatternCell(pattern, instrument, toBar, toSlot)) {
+      return pattern;
+    }
+  } else if (anyEventAtPatternCell(pattern, instrument, toBar, toSlot)) {
+    return pattern;
+  }
+
+  const movedEvent: PatternEvent = {
+    ...targetEvent,
+    bar: toBar,
+    slot: toSlot,
+  };
+
+  return {
+    ...pattern,
+    events: {
+      ...pattern.events,
+      [instrument]: sortPatternEvents([
+        ...(pattern.events[instrument] ?? []).filter((event) => event !== targetEvent),
+        movedEvent,
+      ]),
+    },
+  };
+}
+
 function mergeLockedInstrumentEvents(
   currentPattern: GeneratedPattern | null,
   nextPattern: GeneratedPattern,
@@ -2243,7 +2432,11 @@ function App() {
       pendingExecutiveInstruments.length > 0 ||
       pendingRegenerationInstruments.length > 0 ||
       pendingGhostRegenerationCount > 0;
+    const hasManualQueuedCommit = queuedSourcePatternRef.current !== null || queuedCommitInstruments.length > 0;
     if (!hasQueuedChanges) {
+      if (hasManualQueuedCommit) {
+        return;
+      }
       if (queuedRebuildTimeoutRef.current !== null) {
         window.clearTimeout(queuedRebuildTimeoutRef.current);
         queuedRebuildTimeoutRef.current = null;
@@ -2367,6 +2560,7 @@ function App() {
     pendingGridEdits,
     pendingRegenerationInstruments,
     hasQueuedPlaybackCommit,
+    queuedCommitInstruments,
     playbackStatus,
   ]);
 
@@ -3071,6 +3265,33 @@ function App() {
     setPattern(nextPattern);
   }
 
+  function queueManualPlaybackPattern(nextPattern: GeneratedPattern, instruments: InstrumentId[]) {
+    queuedLoopDelayKeyRef.current = null;
+    queuedLoopDelayRemainingRef.current = 0;
+    setQueuedLoopDelayRemaining(0);
+    setHasQueuedPlaybackCommit(true);
+    queuedSourcePatternRef.current = nextPattern;
+    setPendingGridEdits((current) => current.filter((edit) => !instruments.includes(edit.instrument)));
+    updateQueuedInstrumentStateMany(setPendingRegenerationInstruments, instruments, false);
+    updateQueuedInstrumentStateMany(setNeedsRegenerationInstruments, instruments, false);
+    setQueuedCommitInstruments((current) =>
+      instruments.reduce((nextList, instrument) => setInstrumentQueuedState(nextList, instrument, true), current),
+    );
+    getPatternPlayer().queueLoopCommit({
+      pattern: nextPattern,
+      bpmOverride: bpm,
+      remainingSafetyLoops: 0,
+      onApplied: () => {
+        queuedSourcePatternRef.current = null;
+        suppressInstrumentSyncRef.current = true;
+        setCommittedPattern(nextPattern);
+        setQueuedCommitInstruments((current) =>
+          instruments.reduce((nextList, instrument) => setInstrumentQueuedState(nextList, instrument, false), current),
+        );
+      },
+    });
+  }
+
   function acknowledgeManualInstrumentEdits(instrument: InstrumentId) {
     setNeedsRegenerationInstruments((current) => current.filter((item) => item !== instrument));
     updateRenderedInstrumentSnapshots([instrument]);
@@ -3141,22 +3362,20 @@ function App() {
     try {
       const instrumentId = instrument as InstrumentId;
       if (playbackStatus === "Playing") {
-        setPendingGridEdits((current) => {
-          const hasVisibleEvent = resolveQueuedVisibleStateForCell(
-            getQueuedBasePattern(),
-            current,
-            instrumentId,
-            barIndex,
-            slotIndex,
-          );
-          return upsertPendingGridToggle(current, {
-            kind: "toggle",
-            instrument: instrumentId,
-            bar: barIndex,
-            slot: slotIndex,
-            nextHasVisibleEvent: !hasVisibleEvent,
-          });
-        });
+        const basePattern = getQueuedBasePattern();
+        const nextPattern = event
+          ? removePatternHitLocally(basePattern, instrumentId, barIndex, slotIndex, event.hit_type)
+          : addManualBaseHitLocally(
+              basePattern,
+              instrumentId,
+              barIndex,
+              slotIndex,
+              currentInstrumentSnapshots[instrumentId],
+              currentGlobalContext,
+            );
+        if (nextPattern !== basePattern) {
+          queueManualPlaybackPattern(nextPattern, [instrumentId]);
+        }
         return;
       }
 
@@ -3202,18 +3421,20 @@ function App() {
 
     try {
       if (playbackStatus === "Playing") {
-        setPendingGridEdits((current) => [
-          ...current,
-          {
-            kind: "move",
-            instrument: instrument as InstrumentId,
-            fromBar: dragState.bar,
-            fromSlot: dragState.slot,
-            toBar: barIndex,
-            toSlot: slotIndex,
-            hitType: dragState.hitType,
-          },
-        ]);
+        const instrumentId = instrument as InstrumentId;
+        const basePattern = getQueuedBasePattern();
+        const nextPattern = movePatternHitLocally(
+          basePattern,
+          instrumentId,
+          dragState.bar,
+          dragState.slot,
+          barIndex,
+          slotIndex,
+          dragState.hitType,
+        );
+        if (nextPattern !== basePattern) {
+          queueManualPlaybackPattern(nextPattern, [instrumentId]);
+        }
         return;
       }
 
