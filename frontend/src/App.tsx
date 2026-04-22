@@ -230,7 +230,7 @@ type PendingGridEdit =
       instrument: InstrumentId;
       bar: number;
       slot: number;
-      hasVisibleEvent: boolean;
+      nextHasVisibleEvent: boolean;
     }
   | {
       kind: "move";
@@ -280,17 +280,86 @@ function buildQueuedUpdateKey(
   const editKey = queuedEdits
     .map((edit) =>
       edit.kind === "toggle"
-        ? `t:${edit.instrument}:${edit.bar}:${edit.slot}:${edit.hasVisibleEvent ? 1 : 0}`
+        ? `t:${edit.instrument}:${edit.bar}:${edit.slot}:${edit.nextHasVisibleEvent ? 1 : 0}`
         : `m:${edit.instrument}:${edit.fromBar}:${edit.fromSlot}:${edit.toBar}:${edit.toSlot}:${edit.hitType}`,
     )
     .join("|");
   return `${executiveInstruments.join(",")}::${regenerationInstruments.join(",")}::${ghostRequestCount}::${editKey}`;
 }
 
+function hasVisibleEventAtPatternCell(
+  pattern: GeneratedPattern,
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+): boolean {
+  return (pattern.events[instrument] ?? []).some(
+    (event) => event.bar === bar && event.slot === slot && event.hit_type !== "ghost",
+  );
+}
+
+function resolveQueuedVisibleStateForCell(
+  basePattern: GeneratedPattern,
+  queuedEdits: PendingGridEdit[],
+  instrument: InstrumentId,
+  bar: number,
+  slot: number,
+): boolean {
+  let hasVisibleEvent = hasVisibleEventAtPatternCell(basePattern, instrument, bar, slot);
+
+  for (const edit of queuedEdits) {
+    if (edit.kind === "toggle") {
+      if (edit.instrument === instrument && edit.bar === bar && edit.slot === slot) {
+        hasVisibleEvent = edit.nextHasVisibleEvent;
+      }
+      continue;
+    }
+
+    if (edit.hitType === "ghost" || edit.instrument !== instrument) {
+      continue;
+    }
+    if (edit.fromBar === bar && edit.fromSlot === slot) {
+      hasVisibleEvent = false;
+    }
+    if (edit.toBar === bar && edit.toSlot === slot) {
+      hasVisibleEvent = true;
+    }
+  }
+
+  return hasVisibleEvent;
+}
+
+function upsertPendingGridToggle(
+  queuedEdits: PendingGridEdit[],
+  nextToggle: Extract<PendingGridEdit, { kind: "toggle" }>,
+): PendingGridEdit[] {
+  return [
+    ...queuedEdits.filter(
+      (edit) =>
+        edit.kind !== "toggle" ||
+        edit.instrument !== nextToggle.instrument ||
+        edit.bar !== nextToggle.bar ||
+        edit.slot !== nextToggle.slot,
+    ),
+    nextToggle,
+  ];
+}
+
+function isInstrumentEnabled(snapshot: InstrumentControlSnapshot): boolean {
+  if (typeof snapshot.enabled === "boolean") {
+    return snapshot.enabled;
+  }
+  if (typeof snapshot.tomHits === "number") {
+    return snapshot.tomHits > 0;
+  }
+  return true;
+}
+
 function mergeSelectedInstrumentEvents(
   basePattern: GeneratedPattern,
   nextPattern: GeneratedPattern,
   instruments: InstrumentId[],
+  snapshots: Record<InstrumentId, InstrumentControlSnapshot>,
 ): GeneratedPattern {
   if (instruments.length === 0) {
     return basePattern;
@@ -302,6 +371,11 @@ function mergeSelectedInstrumentEvents(
   const fixedKickSlots = instrumentSet.has("kick") ? new Set<string>() : buildVisibleSlotLookup(basePattern.events.kick ?? []);
   const mergedEvents = { ...basePattern.events };
   for (const instrument of instruments) {
+    if (!isInstrumentEnabled(snapshots[instrument])) {
+      mergedEvents[instrument] = [];
+      continue;
+    }
+
     const preservedFillEvents = (basePattern.events[instrument] ?? []).filter((event) => fillSlots.has(slotKey(event.bar, event.slot)));
     let nextEvents = (nextPattern.events[instrument] ?? []).filter((event) => !fillSlots.has(slotKey(event.bar, event.slot)));
 
@@ -1863,16 +1937,19 @@ function App() {
   const [pendingGridEdits, setPendingGridEdits] = useState<PendingGridEdit[]>([]);
   const [pendingGhostRegenerationCount, setPendingGhostRegenerationCount] = useState(0);
   const [queuedLoopDelayRemaining, setQueuedLoopDelayRemaining] = useState(0);
+  const [hasQueuedPlaybackCommit, setHasQueuedPlaybackCommit] = useState(false);
+  const [queuedCommitInstruments, setQueuedCommitInstruments] = useState<InstrumentId[]>([]);
   const [pendingStructureChange, setPendingStructureChange] = useState<{
     nextBars: number;
     nextGroupingRaw: string;
   } | null>(null);
   const patternPlayerRef = useRef<PatternPlayer | null>(null);
   const patternRef = useRef(pattern);
+  const playbackStatusRef = useRef(playbackStatus);
+  const queuedSourcePatternRef = useRef<GeneratedPattern | null>(null);
   const lastGenerateSignatureRef = useRef<string | null>(null);
   const seedWarningTimeoutRef = useRef<number | null>(null);
   const pendingStructureActionRef = useRef<(() => void) | null>(null);
-  const preparedLoopPatternRef = useRef<GeneratedPattern | null>(null);
   const latestInstrumentSnapshotsRef = useRef<Record<InstrumentId, InstrumentControlSnapshot> | null>(null);
   const renderedInstrumentSnapshotsRef = useRef<Record<InstrumentId, InstrumentControlSnapshot> | null>(null);
   const previousInstrumentSnapshotsRef = useRef<Record<InstrumentId, InstrumentControlSnapshot> | null>(null);
@@ -1927,6 +2004,7 @@ function App() {
   const pendingGhostInstruments = getGhostTargetInstruments();
   const liveUpdatingInstruments = INSTRUMENT_IDS.filter(
     (instrument) =>
+      queuedCommitInstruments.includes(instrument) ||
       pendingGridEditInstruments.includes(instrument) ||
       pendingExecutiveInstruments.includes(instrument) ||
       pendingRegenerationInstruments.includes(instrument) ||
@@ -1980,6 +2058,10 @@ function App() {
   useEffect(() => {
     patternRef.current = pattern;
   }, [pattern]);
+
+  useEffect(() => {
+    playbackStatusRef.current = playbackStatus;
+  }, [playbackStatus]);
 
   useEffect(() => {
     latestInstrumentSnapshotsRef.current = currentInstrumentSnapshots;
@@ -2036,48 +2118,14 @@ function App() {
 
   useEffect(() => {
     const player = getPatternPlayer();
-    player.setLoopBoundaryHandler(() => {
-      const preparedPattern = preparedLoopPatternRef.current;
-      if (queuedLoopDelayRemainingRef.current > 0) {
-        const nextRemaining = Math.max(0, queuedLoopDelayRemainingRef.current - 1);
-        queuedLoopDelayRemainingRef.current = nextRemaining;
-        setQueuedLoopDelayRemaining(nextRemaining);
-        return;
-      }
-
-      if (!preparedPattern) {
-        return;
-      }
-
-      preparedLoopPatternRef.current = null;
-      queuedLoopDelayKeyRef.current = null;
-      setCommittedPattern(preparedPattern);
-      updateRenderedInstrumentSnapshots([
-        ...pendingExecutiveRef.current,
-        ...pendingRegenerationRef.current,
-      ]);
-      if (pendingGhostRegenerationCountRef.current > 0) {
-        setGhostRerollCount((current) => current + pendingGhostRegenerationCountRef.current);
-      }
-      setPendingGridEdits([]);
-      setPendingExecutiveInstruments([]);
-      setPendingRegenerationInstruments([]);
-      setPendingGhostRegenerationCount(0);
-      setQueuedLoopDelayRemaining(0);
-      setNeedsRegenerationInstruments((current) =>
-        current.filter(
-          (instrument) =>
-            !pendingExecutiveRef.current.includes(instrument) && !pendingRegenerationRef.current.includes(instrument),
-        ),
-      );
-
-      return {
-        pattern: preparedPattern,
-      };
+    player.setQueuedPlaybackCommitStateHandler((state) => {
+      queuedLoopDelayRemainingRef.current = state.remainingSafetyLoops;
+      setQueuedLoopDelayRemaining(state.remainingSafetyLoops);
+      setHasQueuedPlaybackCommit(state.hasQueuedCommit);
     });
 
     return () => {
-      player.setLoopBoundaryHandler(null);
+      player.setQueuedPlaybackCommitStateHandler(null);
     };
   }, []);
 
@@ -2160,10 +2208,12 @@ function App() {
 
   useEffect(() => {
     if (playbackStatus !== "Playing") {
-      preparedLoopPatternRef.current = null;
+      getPatternPlayer().clearQueuedLoopCommit();
+      queuedSourcePatternRef.current = null;
       rebuildRequestIdRef.current += 1;
       queuedLoopDelayKeyRef.current = null;
       queuedLoopDelayRemainingRef.current = 0;
+      setQueuedCommitInstruments([]);
       setQueuedLoopDelayRemaining(0);
       return;
     }
@@ -2174,11 +2224,15 @@ function App() {
       pendingRegenerationInstruments.length > 0 ||
       pendingGhostRegenerationCount > 0;
     if (!hasQueuedChanges) {
-      preparedLoopPatternRef.current = null;
-      rebuildRequestIdRef.current += 1;
-      queuedLoopDelayKeyRef.current = null;
-      queuedLoopDelayRemainingRef.current = 0;
-      setQueuedLoopDelayRemaining(0);
+      if (!hasQueuedPlaybackCommit) {
+        getPatternPlayer().clearQueuedLoopCommit();
+        queuedSourcePatternRef.current = null;
+        rebuildRequestIdRef.current += 1;
+        queuedLoopDelayKeyRef.current = null;
+        queuedLoopDelayRemainingRef.current = 0;
+        setQueuedCommitInstruments([]);
+        setQueuedLoopDelayRemaining(0);
+      }
       return;
     }
 
@@ -2200,7 +2254,7 @@ function App() {
     async function rebuildLoopPattern() {
       try {
         const nextPattern = await materializeQueuedPattern(
-          patternRef.current,
+          getQueuedBasePattern(),
           pendingGridEdits,
           pendingExecutiveInstruments,
           pendingRegenerationInstruments,
@@ -2212,12 +2266,57 @@ function App() {
           return;
         }
 
-        preparedLoopPatternRef.current = nextPattern;
+        const committedExecutiveInstruments = [...pendingExecutiveInstruments];
+        const committedRegenerationInstruments = [...pendingRegenerationInstruments];
+        const committedGhostRegenerationCount = pendingGhostRegenerationCount;
+        const committedInstruments = INSTRUMENT_IDS.filter(
+          (instrument) =>
+            pendingGridEdits.some((edit) => edit.instrument === instrument) ||
+            committedExecutiveInstruments.includes(instrument) ||
+            committedRegenerationInstruments.includes(instrument) ||
+            (committedGhostRegenerationCount > 0 && pendingGhostInstruments.includes(instrument)),
+        );
+        queuedSourcePatternRef.current = nextPattern;
+        setQueuedCommitInstruments(committedInstruments);
+        setPendingGridEdits([]);
+        setPendingExecutiveInstruments([]);
+        setPendingRegenerationInstruments([]);
+        setPendingGhostRegenerationCount(0);
+        getPatternPlayer().queueLoopCommit({
+          pattern: nextPattern,
+          bpmOverride: bpm,
+          remainingSafetyLoops: queuedLoopDelayRemainingRef.current,
+          onApplied: () => {
+            queuedLoopDelayKeyRef.current = null;
+            queuedSourcePatternRef.current = null;
+            suppressInstrumentSyncRef.current = true;
+            setCommittedPattern(nextPattern);
+            setQueuedCommitInstruments([]);
+            updateRenderedInstrumentSnapshots([
+              ...committedExecutiveInstruments,
+              ...committedRegenerationInstruments,
+            ]);
+            if (committedGhostRegenerationCount > 0) {
+              setGhostRerollCount((current) => current + committedGhostRegenerationCount);
+            }
+            setNeedsRegenerationInstruments((current) =>
+              current.filter(
+                (instrument) =>
+                  !committedExecutiveInstruments.includes(instrument) &&
+                  !committedRegenerationInstruments.includes(instrument),
+              ),
+            );
+          },
+        });
       } catch (error) {
         if (requestId !== rebuildRequestIdRef.current) {
           return;
         }
 
+        setPendingGridEdits([]);
+        setQueuedCommitInstruments((current) =>
+          current.filter((instrument) => !pendingGridEdits.some((edit) => edit.instrument === instrument)),
+        );
         setGenerateError(error instanceof Error ? error.message : "Failed to prepare the next loop.");
       }
     }
@@ -2229,6 +2328,7 @@ function App() {
     pendingExecutiveInstruments,
     pendingGridEdits,
     pendingRegenerationInstruments,
+    hasQueuedPlaybackCommit,
     playbackStatus,
   ]);
 
@@ -2256,6 +2356,12 @@ function App() {
       patternPlayerRef.current = new PatternPlayer();
     }
     return patternPlayerRef.current;
+  }
+
+  function getQueuedBasePattern(): GeneratedPattern {
+    // Playback keeps a single next-commit snapshot: every rebuild starts from the
+    // latest full source pattern, not from a stack of incremental intents.
+    return queuedSourcePatternRef.current ?? patternRef.current;
   }
 
   function stopPlaybackStatefully() {
@@ -2680,10 +2786,12 @@ function App() {
   }
 
   function clearQueuedLoopChanges() {
-    preparedLoopPatternRef.current = null;
+    getPatternPlayer().clearQueuedLoopCommit();
+    queuedSourcePatternRef.current = null;
     rebuildRequestIdRef.current += 1;
     queuedLoopDelayKeyRef.current = null;
     queuedLoopDelayRemainingRef.current = 0;
+    setQueuedCommitInstruments([]);
     setPendingGridEdits([]);
     setPendingExecutiveInstruments([]);
     setPendingRegenerationInstruments([]);
@@ -2806,6 +2914,8 @@ function App() {
   async function regenerateSelectedInstruments(
     basePattern: GeneratedPattern,
     instruments: InstrumentId[],
+    snapshots: Record<InstrumentId, InstrumentControlSnapshot> = latestInstrumentSnapshotsRef.current ??
+      buildCurrentInstrumentSnapshots(),
   ): Promise<GeneratedPattern> {
     const unlockedInstruments = instruments.filter((instrument) => !lockedInstruments.includes(instrument));
     if (unlockedInstruments.length === 0) {
@@ -2813,7 +2923,7 @@ function App() {
     }
 
     const freshPattern = await generatePattern(buildPartialRegenerationRequest(basePattern));
-    return mergeSelectedInstrumentEvents(basePattern, freshPattern, unlockedInstruments);
+    return mergeSelectedInstrumentEvents(basePattern, freshPattern, unlockedInstruments, snapshots);
   }
 
   async function applyPendingGridEdits(basePattern: GeneratedPattern, queuedEdits: PendingGridEdit[]): Promise<GeneratedPattern> {
@@ -2821,15 +2931,20 @@ function App() {
 
     for (const edit of queuedEdits) {
       if (edit.kind === "toggle") {
-        nextPattern = edit.hasVisibleEvent
-          ? await removePatternHit({
+        const hasVisibleEvent = hasVisibleEventAtPatternCell(nextPattern, edit.instrument, edit.bar, edit.slot);
+        if (hasVisibleEvent === edit.nextHasVisibleEvent) {
+          continue;
+        }
+
+        nextPattern = edit.nextHasVisibleEvent
+          ? await addPatternBaseHit({
               pattern: nextPattern,
               instrument: edit.instrument,
               bar: edit.bar,
               slot: edit.slot,
               context: buildPatternEditContextForPattern(nextPattern),
             })
-          : await addPatternBaseHit({
+          : await removePatternHit({
               pattern: nextPattern,
               instrument: edit.instrument,
               bar: edit.bar,
@@ -2901,7 +3016,7 @@ function App() {
       nextPattern = applyExecutiveUpdates(nextPattern, executiveInstruments, snapshots);
     }
     if (regenerationInstruments.length > 0) {
-      nextPattern = await regenerateSelectedInstruments(nextPattern, regenerationInstruments);
+      nextPattern = await regenerateSelectedInstruments(nextPattern, regenerationInstruments, snapshots);
     }
     if (ghostRequestCount > 0) {
       nextPattern = await applyGhostRegeneration(nextPattern, ghostRequestCount);
@@ -2912,6 +3027,11 @@ function App() {
   function setCommittedPattern(nextPattern: GeneratedPattern) {
     patternRef.current = nextPattern;
     setPattern(nextPattern);
+  }
+
+  function acknowledgeManualInstrumentEdits(instrument: InstrumentId) {
+    setNeedsRegenerationInstruments((current) => current.filter((item) => item !== instrument));
+    updateRenderedInstrumentSnapshots([instrument]);
   }
 
   function getInstrumentStatus(instrument: InstrumentId | InstrumentId[]): InstrumentStatus | null {
@@ -2940,6 +3060,10 @@ function App() {
         ? queuedLoopDelayRemaining > 0
           ? "Updating instruments are staging for one safety loop."
           : "Updating instruments will land at the next loop boundary."
+        : hasQueuedPlaybackCommit
+          ? queuedLoopDelayRemaining > 0
+            ? "Queued pattern is staging for one safety loop."
+            : "Queued pattern will land at the next loop boundary."
         : "Live edits stage until the loop boundary.";
     }
 
@@ -2975,16 +3099,22 @@ function App() {
     try {
       const instrumentId = instrument as InstrumentId;
       if (playbackStatus === "Playing") {
-        setPendingGridEdits((current) => [
-          ...current,
-          {
+        setPendingGridEdits((current) => {
+          const hasVisibleEvent = resolveQueuedVisibleStateForCell(
+            getQueuedBasePattern(),
+            current,
+            instrumentId,
+            barIndex,
+            slotIndex,
+          );
+          return upsertPendingGridToggle(current, {
             kind: "toggle",
             instrument: instrumentId,
             bar: barIndex,
             slot: slotIndex,
-            hasVisibleEvent: Boolean(event),
-          },
-        ]);
+            nextHasVisibleEvent: !hasVisibleEvent,
+          });
+        });
         return;
       }
 
@@ -3004,6 +3134,7 @@ function App() {
             context: buildPatternEditContext(),
           });
       setCommittedPattern(nextPattern);
+      acknowledgeManualInstrumentEdits(instrumentId);
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to edit pattern.");
     } finally {
@@ -3055,6 +3186,7 @@ function App() {
         context: buildPatternEditContext(),
       });
       setCommittedPattern(nextPattern);
+      acknowledgeManualInstrumentEdits(instrument as InstrumentId);
     } catch (error) {
       setGenerateError(error instanceof Error ? error.message : "Failed to move hit.");
     } finally {
@@ -3098,24 +3230,52 @@ function App() {
     setIsGeneratingPattern(true);
 
     try {
-      stopPlaybackStatefully();
+      const wasPlaying = playbackStatusRef.current === "Playing";
+      if (!wasPlaying) {
+        stopPlaybackStatefully();
+      }
       clearQueuedLoopChanges();
       setNeedsRegenerationInstruments([]);
       const request = buildRequest();
       const requestSignature = JSON.stringify(request);
       const shouldShowFixedSeedWarning =
         request.seed !== undefined && lastGenerateSignatureRef.current === requestSignature;
-      const currentPattern = getPatternForCurrentStructure();
+      const currentPattern = wasPlaying ? getQueuedBasePattern() : getPatternForCurrentStructure();
       const nextPattern = await generatePattern(request);
       const mergedPattern = mergeLockedInstrumentEvents(currentPattern, nextPattern, lockedInstruments);
       const unlockedInstruments = INSTRUMENT_IDS.filter((instrument) => !lockedInstruments.includes(instrument));
-      suppressInstrumentSyncRef.current = true;
-      setCommittedPattern(mergedPattern);
-      updateRenderedInstrumentSnapshots(unlockedInstruments);
-      renderedGlobalContextRef.current = latestGlobalContextRef.current ?? buildCurrentGlobalContext();
-      previousInstrumentSnapshotsRef.current = latestInstrumentSnapshotsRef.current ?? buildCurrentInstrumentSnapshots();
-      setGhostRerollCount(0);
-      lastGenerateSignatureRef.current = requestSignature;
+
+      if (wasPlaying && playbackStatusRef.current === "Playing") {
+        queuedSourcePatternRef.current = mergedPattern;
+        setQueuedCommitInstruments(unlockedInstruments);
+        getPatternPlayer().queueLoopCommit({
+          pattern: mergedPattern,
+          bpmOverride: bpm,
+          remainingSafetyLoops: 1,
+          onApplied: () => {
+            queuedLoopDelayKeyRef.current = null;
+            queuedSourcePatternRef.current = null;
+            suppressInstrumentSyncRef.current = true;
+            setCommittedPattern(mergedPattern);
+            setQueuedCommitInstruments([]);
+            updateRenderedInstrumentSnapshots(unlockedInstruments);
+            renderedGlobalContextRef.current = latestGlobalContextRef.current ?? buildCurrentGlobalContext();
+            previousInstrumentSnapshotsRef.current = latestInstrumentSnapshotsRef.current ?? buildCurrentInstrumentSnapshots();
+            setGhostRerollCount(0);
+            lastGenerateSignatureRef.current = requestSignature;
+          },
+        });
+      } else {
+        queuedSourcePatternRef.current = null;
+        suppressInstrumentSyncRef.current = true;
+        setCommittedPattern(mergedPattern);
+        updateRenderedInstrumentSnapshots(unlockedInstruments);
+        renderedGlobalContextRef.current = latestGlobalContextRef.current ?? buildCurrentGlobalContext();
+        previousInstrumentSnapshotsRef.current = latestInstrumentSnapshotsRef.current ?? buildCurrentInstrumentSnapshots();
+        setGhostRerollCount(0);
+        lastGenerateSignatureRef.current = requestSignature;
+      }
+
       trackEvent("generate_pattern", buildAnalyticsPayload());
       if (shouldShowFixedSeedWarning) {
         setSeedFixedWarningVisible(true);
@@ -3152,7 +3312,7 @@ function App() {
     setIsGenerating(true);
 
     try {
-      const currentPattern = preparedLoopPatternRef.current ?? getPatternForCurrentStructure();
+      const currentPattern = hasQueuedPlaybackCommit ? getQueuedBasePattern() : getPatternForCurrentStructure();
       const blob = patternHasEvents(currentPattern) ? await exportPatternMidi(currentPattern, bpm) : await generateMidi(buildRequest());
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -3248,8 +3408,9 @@ function App() {
   async function handleStop() {
     stopPlaybackStatefully();
     try {
-      const nextPattern = preparedLoopPatternRef.current ?? (await materializeQueuedPattern(patternRef.current));
+      const nextPattern = hasQueuedPlaybackCommit ? getQueuedBasePattern() : await materializeQueuedPattern(getQueuedBasePattern());
       if (
+        hasQueuedPlaybackCommit ||
         pendingGridEditsRef.current.length > 0 ||
         pendingExecutiveRef.current.length > 0 ||
         pendingRegenerationRef.current.length > 0 ||
@@ -3269,7 +3430,6 @@ function App() {
       setGenerateError(error instanceof Error ? error.message : "Failed to land queued changes.");
     } finally {
       suppressInstrumentSyncRef.current = true;
-      preparedLoopPatternRef.current = null;
       clearQueuedLoopChanges();
     }
   }
@@ -3291,12 +3451,12 @@ function App() {
     setGenerateError("");
     try {
       let currentPattern =
-        preparedLoopPatternRef.current ??
+        (hasQueuedPlaybackCommit ? getQueuedBasePattern() : null) ??
         (pendingGridEditsRef.current.length > 0 ||
         pendingExecutiveRef.current.length > 0 ||
         pendingRegenerationRef.current.length > 0 ||
         pendingGhostRegenerationCountRef.current > 0
-          ? await materializeQueuedPattern(getPatternForCurrentStructure())
+          ? await materializeQueuedPattern(getQueuedBasePattern())
           : getPatternForCurrentStructure());
       if (playbackStatus !== "Playing" && needsRegenerationInstruments.length > 0) {
         currentPattern = await regenerateSelectedInstruments(currentPattern, needsRegenerationInstruments);
@@ -3310,7 +3470,7 @@ function App() {
         return;
       }
       if (
-        preparedLoopPatternRef.current ||
+        hasQueuedPlaybackCommit ||
         pendingGridEditsRef.current.length > 0 ||
         pendingExecutiveRef.current.length > 0 ||
         pendingRegenerationRef.current.length > 0 ||

@@ -67,17 +67,49 @@ const HIT_TYPE_SAMPLE_FILENAMES: Record<string, Record<string, string>> = {
   },
 };
 
-type ScheduledEvent = {
-  timeMs: number;
+type CompiledLoopEvent = {
+  timeInLoopSec: number;
   instrument: string;
   hitType: PatternEvent["hit_type"];
   velocity: number;
   sampleFilename: string;
 };
 
-type LoopBoundaryUpdate = {
-  pattern?: GeneratedPattern;
+type PlaybackCommit = {
+  pattern: GeneratedPattern;
+  bpmOverride?: number | null;
+};
+
+type SchedulerConfig = {
+  tickMs: number;
+  lookaheadSec: number;
+  initialStartOffsetSec: number;
+};
+
+type CompiledLoop = {
+  events: CompiledLoopEvent[];
+  durationSec: number;
+  bpm: number;
+};
+
+type TransportRuntime = {
+  isRunning: boolean;
+  loopStartAudioTimeSec: number;
+  nextLoopBoundaryAudioTimeSec: number;
+  scheduledThroughSec: number;
+};
+
+type QueuedPlaybackCommit = {
+  pattern: GeneratedPattern;
   bpmOverride?: number;
+  remainingSafetyLoops: number;
+  onApplied: (() => void) | null;
+  compiledLoop: CompiledLoop | null;
+};
+
+type QueuedPlaybackCommitState = {
+  hasQueuedCommit: boolean;
+  remainingSafetyLoops: number;
 };
 
 function slotToTicks(slotIndex: number, swing: number): number {
@@ -170,19 +202,25 @@ function chokeTargetsForInstrument(instrument: string): string[] {
 }
 
 export class PatternPlayer {
+  private static readonly SCHEDULER_CONFIG: SchedulerConfig = {
+    tickMs: 25,
+    lookaheadSec: 0.1,
+    initialStartOffsetSec: 0.03,
+  };
+
   private audioContext: AudioContext | null = null;
   private bufferCache = new Map<string, AudioBuffer>();
   private activeSources = new Map<string, AudioBufferSourceNode[]>();
-  private timers: number[] = [];
-  private loopTimer: number | null = null;
-  private startTimestamp = 0;
-  private events: ScheduledEvent[] = [];
-  private loopDurationMs = 0;
+  private scheduledSources = new Set<AudioBufferSourceNode>();
+  private schedulerTimer: number | null = null;
+  private compiledLiveLoop: CompiledLoop | null = null;
+  private runtime: TransportRuntime | null = null;
   private loopEnabled = false;
   private currentPattern: GeneratedPattern | null = null;
   private currentBpmOverride: number | null = null;
   private isPlaying = false;
-  private loopBoundaryHandler: (() => LoopBoundaryUpdate | void) | null = null;
+  private queuedPlaybackCommit: QueuedPlaybackCommit | null = null;
+  private queuedPlaybackCommitStateHandler: ((state: QueuedPlaybackCommitState) => void) | null = null;
 
   async play(pattern: GeneratedPattern, loopEnabled: boolean, bpmOverride?: number): Promise<void> {
     const context = this.ensureAudioContext();
@@ -194,11 +232,16 @@ export class PatternPlayer {
     this.currentPattern = pattern;
     this.currentBpmOverride = bpmOverride ?? null;
     this.loopEnabled = loopEnabled;
-    this.events = await this.buildSchedule(pattern, this.currentBpmOverride ?? undefined);
-    this.loopDurationMs = this.patternDurationMs(pattern, this.currentBpmOverride ?? undefined);
-    this.startTimestamp = performance.now();
+    this.compiledLiveLoop = await this.compileLoop(pattern, this.currentBpmOverride ?? undefined);
+    const startTime = context.currentTime + PatternPlayer.SCHEDULER_CONFIG.initialStartOffsetSec;
+    this.runtime = {
+      isRunning: true,
+      loopStartAudioTimeSec: startTime,
+      nextLoopBoundaryAudioTimeSec: startTime + this.compiledLiveLoop.durationSec,
+      scheduledThroughSec: startTime,
+    };
     this.isPlaying = true;
-    this.schedulePlayback();
+    this.startScheduler();
   }
 
   async restart(bpmOverride?: number): Promise<void> {
@@ -209,14 +252,18 @@ export class PatternPlayer {
   }
 
   stop(): void {
-    for (const timer of this.timers) {
-      window.clearTimeout(timer);
+    if (this.schedulerTimer !== null) {
+      window.clearInterval(this.schedulerTimer);
+      this.schedulerTimer = null;
     }
-    this.timers = [];
-    if (this.loopTimer !== null) {
-      window.clearTimeout(this.loopTimer);
-      this.loopTimer = null;
+    for (const source of this.scheduledSources) {
+      try {
+        source.stop();
+      } catch {
+        // Ignore already-stopped nodes.
+      }
     }
+    this.scheduledSources.clear();
     for (const sources of this.activeSources.values()) {
       for (const source of sources) {
         try {
@@ -227,32 +274,45 @@ export class PatternPlayer {
       }
     }
     this.activeSources.clear();
+    this.compiledLiveLoop = null;
+    this.runtime = null;
     this.isPlaying = false;
   }
 
   setLoopEnabled(enabled: boolean): void {
     this.loopEnabled = enabled;
-    if (!this.isPlaying) {
-      return;
-    }
-    if (!enabled) {
-      if (this.loopTimer !== null) {
-        window.clearTimeout(this.loopTimer);
-        this.loopTimer = null;
-      }
-      return;
-    }
-    if (this.loopTimer === null) {
-      const elapsed = performance.now() - this.startTimestamp;
-      const remaining = Math.max(0, this.loopDurationMs - elapsed);
-      this.loopTimer = window.setTimeout(() => {
-        void this.handleLoopRestart();
-      }, remaining);
-    }
   }
 
-  setLoopBoundaryHandler(handler: (() => LoopBoundaryUpdate | void) | null): void {
-    this.loopBoundaryHandler = handler;
+  queueLoopCommit(commit: {
+    pattern: GeneratedPattern;
+    bpmOverride?: number;
+    remainingSafetyLoops?: number;
+    onApplied?: () => void;
+  }): void {
+    const queuedCommit: QueuedPlaybackCommit = {
+      pattern: commit.pattern,
+      bpmOverride: commit.bpmOverride,
+      remainingSafetyLoops: Math.max(0, commit.remainingSafetyLoops ?? 0),
+      onApplied: commit.onApplied ?? null,
+      compiledLoop: null,
+    };
+    this.queuedPlaybackCommit = queuedCommit;
+    void this.prepareQueuedCommit(queuedCommit);
+    this.emitQueuedPlaybackCommitState();
+  }
+
+  clearQueuedLoopCommit(): void {
+    this.queuedPlaybackCommit = null;
+    this.emitQueuedPlaybackCommitState();
+  }
+
+  peekQueuedLoopCommitPattern(): GeneratedPattern | null {
+    return this.queuedPlaybackCommit?.pattern ?? null;
+  }
+
+  setQueuedPlaybackCommitStateHandler(handler: ((state: QueuedPlaybackCommitState) => void) | null): void {
+    this.queuedPlaybackCommitStateHandler = handler;
+    this.emitQueuedPlaybackCommitState();
   }
 
   private ensureAudioContext(): AudioContext {
@@ -278,8 +338,8 @@ export class PatternPlayer {
     return buffer;
   }
 
-  private async buildSchedule(pattern: GeneratedPattern, bpmOverride?: number): Promise<ScheduledEvent[]> {
-    const scheduledEvents: ScheduledEvent[] = [];
+  private async compileLoop(pattern: GeneratedPattern, bpmOverride?: number): Promise<CompiledLoop> {
+    const events: CompiledLoopEvent[] = [];
     const playbackBpm = bpmOverride ?? pattern.meta.bpm;
 
     for (const instrument of pattern.instrument_order) {
@@ -291,8 +351,8 @@ export class PatternPlayer {
         await this.loadBuffer(sampleFilename);
         const absoluteSlot = event.bar * pattern.meta.slots_per_bar + event.slot;
         const startTick = slotToTicks(absoluteSlot, pattern.meta.swing) + event.offset;
-        scheduledEvents.push({
-          timeMs: Math.max(0, ticksToMilliseconds(startTick, playbackBpm)),
+        events.push({
+          timeInLoopSec: Math.max(0, ticksToMilliseconds(startTick, playbackBpm) / 1000),
           instrument,
           hitType: event.hit_type,
           velocity: event.velocity,
@@ -301,7 +361,11 @@ export class PatternPlayer {
       }
     }
 
-    return scheduledEvents.sort((left, right) => left.timeMs - right.timeMs);
+    return {
+      events: events.sort((left, right) => left.timeInLoopSec - right.timeInLoopSec),
+      durationSec: this.patternDurationMs(pattern, playbackBpm) / 1000,
+      bpm: playbackBpm,
+    };
   }
 
   private patternDurationMs(pattern: GeneratedPattern, bpmOverride?: number): number {
@@ -310,40 +374,111 @@ export class PatternPlayer {
     return Math.max(1, ticksToMilliseconds(endTick, bpmOverride ?? pattern.meta.bpm));
   }
 
-  private schedulePlayback(): void {
-    for (const event of this.events) {
-      const timer = window.setTimeout(() => {
-        void this.playEvent(event);
-      }, event.timeMs);
-      this.timers.push(timer);
+  private startScheduler(): void {
+    if (this.schedulerTimer !== null) {
+      window.clearInterval(this.schedulerTimer);
     }
-
-    if (this.loopEnabled) {
-      this.loopTimer = window.setTimeout(() => {
-        void this.handleLoopRestart();
-      }, this.loopDurationMs);
-    }
+    this.tickScheduler();
+    this.schedulerTimer = window.setInterval(() => {
+      this.tickScheduler();
+    }, PatternPlayer.SCHEDULER_CONFIG.tickMs);
   }
 
-  private async handleLoopRestart(): Promise<void> {
-    if (!this.isPlaying || !this.loopEnabled) {
+  private tickScheduler(): void {
+    const context = this.audioContext;
+    const runtime = this.runtime;
+    const compiledLoop = this.compiledLiveLoop;
+    if (!context || !runtime || !compiledLoop || !runtime.isRunning || !this.isPlaying) {
       return;
     }
 
-    const update = this.loopBoundaryHandler?.();
-    if (update?.pattern) {
-      this.currentPattern = update.pattern;
-    }
-    if (update?.bpmOverride !== undefined) {
-      this.currentBpmOverride = update.bpmOverride;
-    }
+    const horizonSec = context.currentTime + PatternPlayer.SCHEDULER_CONFIG.lookaheadSec;
+    while (runtime.scheduledThroughSec < horizonSec) {
+      const segmentEndSec = this.loopEnabled
+        ? Math.min(horizonSec, runtime.nextLoopBoundaryAudioTimeSec)
+        : Math.min(horizonSec, runtime.loopStartAudioTimeSec + compiledLoop.durationSec);
 
-    await this.restart(this.currentBpmOverride ?? undefined);
+      this.scheduleSegment(runtime.scheduledThroughSec, segmentEndSec, runtime.loopStartAudioTimeSec, compiledLoop);
+      runtime.scheduledThroughSec = segmentEndSec;
+
+      if (!this.loopEnabled || runtime.scheduledThroughSec < runtime.nextLoopBoundaryAudioTimeSec) {
+        break;
+      }
+
+      const nextLoopStartSec = runtime.nextLoopBoundaryAudioTimeSec;
+      this.applyQueuedPlaybackCommit();
+      const nextCompiledLoop = this.compiledLiveLoop;
+      if (!nextCompiledLoop) {
+        runtime.isRunning = false;
+        break;
+      }
+      runtime.loopStartAudioTimeSec = nextLoopStartSec;
+      runtime.nextLoopBoundaryAudioTimeSec = nextLoopStartSec + nextCompiledLoop.durationSec;
+      runtime.scheduledThroughSec = nextLoopStartSec;
+    }
   }
 
-  private async playEvent(event: ScheduledEvent): Promise<void> {
+  private applyQueuedPlaybackCommit(): void {
+    if (!this.queuedPlaybackCommit) {
+      return;
+    }
+
+    if (this.queuedPlaybackCommit.remainingSafetyLoops > 0) {
+      this.queuedPlaybackCommit.remainingSafetyLoops -= 1;
+      this.emitQueuedPlaybackCommitState();
+      return;
+    }
+
+    const commit = this.queuedPlaybackCommit;
+    if (!commit.compiledLoop) {
+      return;
+    }
+
+    this.queuedPlaybackCommit = null;
+    this.currentPattern = commit.pattern;
+    this.currentBpmOverride = commit.bpmOverride ?? this.currentBpmOverride;
+    this.compiledLiveLoop = commit.compiledLoop;
+    this.emitQueuedPlaybackCommitState();
+    commit.onApplied?.();
+  }
+
+  private emitQueuedPlaybackCommitState(): void {
+    this.queuedPlaybackCommitStateHandler?.({
+      hasQueuedCommit: this.queuedPlaybackCommit !== null,
+      remainingSafetyLoops: this.queuedPlaybackCommit?.remainingSafetyLoops ?? 0,
+    });
+  }
+
+  private async prepareQueuedCommit(commit: QueuedPlaybackCommit): Promise<void> {
+    const compiledLoop = await this.compileLoop(commit.pattern, commit.bpmOverride);
+    if (this.queuedPlaybackCommit !== commit) {
+      return;
+    }
+    commit.compiledLoop = compiledLoop;
+  }
+
+  private scheduleSegment(
+    windowStartSec: number,
+    windowEndSec: number,
+    loopStartAudioTimeSec: number,
+    compiledLoop: CompiledLoop,
+  ): void {
+    const loopWindowStartSec = windowStartSec - loopStartAudioTimeSec;
+    const loopWindowEndSec = windowEndSec - loopStartAudioTimeSec;
+    for (const event of compiledLoop.events) {
+      if (event.timeInLoopSec < loopWindowStartSec || event.timeInLoopSec >= loopWindowEndSec) {
+        continue;
+      }
+      this.scheduleEvent(event, loopStartAudioTimeSec + event.timeInLoopSec);
+    }
+  }
+
+  private scheduleEvent(event: CompiledLoopEvent, startTimeSec: number): void {
     const context = this.ensureAudioContext();
-    const buffer = this.bufferCache.get(event.sampleFilename) ?? (await this.loadBuffer(event.sampleFilename));
+    const buffer = this.bufferCache.get(event.sampleFilename);
+    if (!buffer) {
+      return;
+    }
 
     for (const chokeGroup of chokeTargetsForInstrument(event.instrument)) {
       const sources = this.activeSources.get(chokeGroup) ?? [];
@@ -365,17 +500,22 @@ export class PatternPlayer {
 
     source.connect(gainNode);
     gainNode.connect(context.destination);
-    source.start();
+    source.start(startTimeSec);
+    this.scheduledSources.add(source);
 
     const chokeGroup = chokeGroupForInstrument(event.instrument);
     if (chokeGroup) {
       const sources = this.activeSources.get(chokeGroup) ?? [];
       sources.push(source);
       this.activeSources.set(chokeGroup, sources);
-      source.onended = () => {
-        const remaining = (this.activeSources.get(chokeGroup) ?? []).filter((item) => item !== source);
-        this.activeSources.set(chokeGroup, remaining);
-      };
     }
+    source.onended = () => {
+      this.scheduledSources.delete(source);
+      if (!chokeGroup) {
+        return;
+      }
+      const remaining = (this.activeSources.get(chokeGroup) ?? []).filter((item) => item !== source);
+      this.activeSources.set(chokeGroup, remaining);
+    };
   }
 }

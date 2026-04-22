@@ -1547,13 +1547,14 @@ summary {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--accent-primary);
+  text-shadow: 0 0 10px rgba(104, 240, 154, 0.12);
 }
 
 .playback-status-detail {
   font-size: 0.72rem;
   letter-spacing: 0.02em;
-  color: rgba(187, 197, 219, 0.78);
+  color: rgba(104, 240, 154, 0.86);
 }
 
 .action-group {
