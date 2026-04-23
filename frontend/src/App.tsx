@@ -242,6 +242,8 @@ type PendingGridEdit =
       hitType: PatternEvent["hit_type"];
     };
 
+type GridCellQueuedState = "add" | "remove" | null;
+
 type InstrumentStatus = {
   kind: "dirty" | "updating";
   label: string;
@@ -886,8 +888,13 @@ function mergeLockedInstrumentEvents(
   };
 }
 
-function buildGridRows(pattern: GeneratedPattern) {
+function buildGridRows(
+  pattern: GeneratedPattern,
+  manualPreviewPattern: GeneratedPattern | null = null,
+  manualPreviewInstruments: InstrumentId[] = [],
+) {
   const fillLookup = new Set(pattern.fill_regions.flatMap((region) => region.slots.map((slot) => `${region.bar}:${slot}`)));
+  const previewInstrumentSet = new Set(manualPreviewInstruments);
 
   return pattern.instrument_order.map((instrument) => {
     const cellMap = new Map<string, PatternEvent>();
@@ -899,12 +906,37 @@ function buildGridRows(pattern: GeneratedPattern) {
       }
     }
 
+    const previewCellMap = new Map<string, PatternEvent>();
+    if (manualPreviewPattern && previewInstrumentSet.has(instrument as InstrumentId)) {
+      for (const event of manualPreviewPattern.events[instrument] ?? []) {
+        const key = `${event.bar}:${event.slot}`;
+        const existing = previewCellMap.get(key);
+        if (!existing || hitPriority(event.hit_type) < hitPriority(existing.hit_type)) {
+          previewCellMap.set(key, event);
+        }
+      }
+    }
+
     const bars = Array.from({ length: pattern.meta.bars }, (_, barIndex) =>
       Array.from({ length: pattern.meta.slots_per_bar }, (_, slotIndex) => {
         const key = `${barIndex}:${slotIndex}`;
+        const baseEvent = cellMap.get(key) ?? null;
+        const previewEnabled = previewInstrumentSet.has(instrument as InstrumentId) && manualPreviewPattern !== null;
+        const previewEvent = previewEnabled ? previewCellMap.get(key) ?? null : baseEvent;
+        let queuedState: GridCellQueuedState = null;
+        if (previewEnabled) {
+          if (!baseEvent && previewEvent) {
+            queuedState = "add";
+          } else if (baseEvent && !previewEvent) {
+            queuedState = "remove";
+          } else if (baseEvent && previewEvent && eventIdentity(baseEvent) !== eventIdentity(previewEvent)) {
+            queuedState = "add";
+          }
+        }
         return {
-          event: cellMap.get(key) ?? null,
+          event: previewEvent,
           fillActive: fillLookup.has(key),
+          queuedState,
         };
       }),
     );
@@ -2161,6 +2193,8 @@ function App() {
   const [queuedLoopDelayRemaining, setQueuedLoopDelayRemaining] = useState(0);
   const [hasQueuedPlaybackCommit, setHasQueuedPlaybackCommit] = useState(false);
   const [queuedCommitInstruments, setQueuedCommitInstruments] = useState<InstrumentId[]>([]);
+  const [manualPreviewPattern, setManualPreviewPattern] = useState<GeneratedPattern | null>(null);
+  const [manualPreviewInstruments, setManualPreviewInstruments] = useState<InstrumentId[]>([]);
   const [pendingStructureChange, setPendingStructureChange] = useState<{
     nextBars: number;
     nextGroupingRaw: string;
@@ -2219,7 +2253,7 @@ function App() {
   ].filter(Boolean);
   const inlineErrorText = inlineErrors.join(" • ");
   const timeSignature = timeSignatureFromGrouping(groupingInput);
-  const gridRows = buildGridRows(pattern);
+  const gridRows = buildGridRows(pattern, manualPreviewPattern, manualPreviewInstruments);
   const pendingGridEditInstruments = INSTRUMENT_IDS.filter((instrument) =>
     pendingGridEdits.some((edit) => edit.instrument === instrument),
   );
@@ -2456,6 +2490,8 @@ function App() {
       queuedLoopDelayKeyRef.current = null;
       queuedLoopDelayRemainingRef.current = 0;
       setQueuedCommitInstruments([]);
+      setManualPreviewPattern(null);
+      setManualPreviewInstruments([]);
       setQueuedLoopDelayRemaining(0);
       return;
     }
@@ -2561,6 +2597,8 @@ function App() {
             suppressInstrumentSyncRef.current = true;
             setCommittedPattern(publishedPattern);
             setQueuedCommitInstruments([]);
+            setManualPreviewPattern(null);
+            setManualPreviewInstruments([]);
             updateRenderedInstrumentSnapshots([
               ...committedExecutiveInstruments,
               ...allowedRegenerationInstruments,
@@ -3079,6 +3117,8 @@ function App() {
     queuedLoopDelayKeyRef.current = null;
     queuedLoopDelayRemainingRef.current = 0;
     setQueuedCommitInstruments([]);
+    setManualPreviewPattern(null);
+    setManualPreviewInstruments([]);
     setPendingGridEdits([]);
     setPendingExecutiveInstruments([]);
     setPendingRegenerationInstruments([]);
@@ -3330,6 +3370,10 @@ function App() {
     setQueuedLoopDelayRemaining(0);
     setHasQueuedPlaybackCommit(true);
     queuedSourcePatternRef.current = nextPattern;
+    setManualPreviewPattern(nextPattern);
+    setManualPreviewInstruments((current) =>
+      instruments.reduce((nextList, instrument) => setInstrumentQueuedState(nextList, instrument, true), current),
+    );
     setPendingGridEdits((current) => current.filter((edit) => !instruments.includes(edit.instrument)));
     updateQueuedInstrumentStateMany(setPendingRegenerationInstruments, instruments, false);
     updateQueuedInstrumentStateMany(setNeedsRegenerationInstruments, instruments, false);
@@ -3344,6 +3388,8 @@ function App() {
         queuedSourcePatternRef.current = null;
         suppressInstrumentSyncRef.current = true;
         setCommittedPattern(nextPattern);
+        setManualPreviewPattern(null);
+        setManualPreviewInstruments([]);
         setQueuedCommitInstruments((current) =>
           instruments.reduce((nextList, instrument) => setInstrumentQueuedState(nextList, instrument, false), current),
         );
@@ -5084,6 +5130,8 @@ function App() {
                               "pattern-cell",
                               cell.fillActive ? "pattern-cell-fill" : "",
                               cell.event ? `pattern-cell-${cell.event.hit_type}` : "",
+                              cell.queuedState === "add" ? "pattern-cell-queued" : "",
+                              cell.queuedState === "remove" ? "pattern-cell-placeholder pattern-cell-queued-remove" : "",
                               cell.event && !isEditGridEnabled ? "pattern-cell-readonly" : "",
                               slotIndex % 8 === 0 ? "pattern-cell-strong" : "",
                               slotIndex % 2 === 0 ? "pattern-cell-even" : "",
@@ -5129,8 +5177,8 @@ function App() {
                                 tabIndex={0}
                                 title={
                                   cell.event
-                                    ? `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1} | ${cell.event.hit_type} | velocity ${cell.event.velocity} | offset ${cell.event.offset}`
-                                    : `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1}`
+                                    ? `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1} | ${cell.event.hit_type} | velocity ${cell.event.velocity} | offset ${cell.event.offset}${cell.queuedState === "add" ? " | queued for next loop" : ""}`
+                                    : `${row.label} | bar ${barIndex + 1} slot ${slotIndex + 1}${cell.queuedState === "remove" ? " | queued removal for next loop" : ""}`
                                 }
                               >
                                 {cell.event && cell.event.offset !== 0 ? (
