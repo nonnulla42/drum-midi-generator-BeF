@@ -2219,6 +2219,9 @@ function App() {
   const queuedLoopDelayKeyRef = useRef<string | null>(null);
   const queuedRebuildTimeoutRef = useRef<number | null>(null);
   const manualPublishVersionRef = useRef<Record<InstrumentId, number>>(createInstrumentCounterRecord());
+  const queuedStructuralCycleRef = useRef<Record<InstrumentId, number>>(createInstrumentCounterRecord(-1));
+  const playbackLoopCycleRef = useRef(0);
+  const lastPlaybackSlotRef = useRef<number | null>(null);
   const previousLockedInstrumentsRef = useRef<InstrumentId[]>([]);
   const rebuildRequestIdRef = useRef(0);
   const suppressInstrumentSyncRef = useRef(false);
@@ -2394,6 +2397,20 @@ function App() {
     const player = getPatternPlayer();
     player.setPlaybackPositionStateHandler((state) => {
       setPlaybackActiveSlot(state.currentAbsoluteSlot);
+      if (state.currentAbsoluteSlot === null) {
+        playbackLoopCycleRef.current = 0;
+        lastPlaybackSlotRef.current = null;
+        return;
+      }
+
+      if (
+        lastPlaybackSlotRef.current !== null &&
+        state.currentAbsoluteSlot < lastPlaybackSlotRef.current
+      ) {
+        playbackLoopCycleRef.current += 1;
+      }
+
+      lastPlaybackSlotRef.current = state.currentAbsoluteSlot;
     });
 
     return () => {
@@ -2530,8 +2547,8 @@ function App() {
     );
     if (queuedLoopDelayKeyRef.current !== queuedUpdateKey) {
       queuedLoopDelayKeyRef.current = queuedUpdateKey;
-      queuedLoopDelayRemainingRef.current = 1;
-      setQueuedLoopDelayRemaining(1);
+      queuedLoopDelayRemainingRef.current = 0;
+      setQueuedLoopDelayRemaining(0);
     }
 
     const requestId = rebuildRequestIdRef.current + 1;
@@ -2579,6 +2596,9 @@ function App() {
           nextPattern,
           committedInstruments,
         );
+        for (const instrument of allowedRegenerationInstruments) {
+          queuedStructuralCycleRef.current[instrument] = playbackLoopCycleRef.current;
+        }
         queuedSourcePatternRef.current = publishedPattern;
         setQueuedCommitInstruments((current) =>
           INSTRUMENT_IDS.filter((instrument) => current.includes(instrument) || committedInstruments.includes(instrument)),
@@ -2590,12 +2610,15 @@ function App() {
         getPatternPlayer().queueLoopCommit({
           pattern: publishedPattern,
           bpmOverride: bpm,
-          remainingSafetyLoops: queuedLoopDelayRemainingRef.current,
+          remainingSafetyLoops: 0,
           onApplied: () => {
             queuedLoopDelayKeyRef.current = null;
             queuedSourcePatternRef.current = null;
             suppressInstrumentSyncRef.current = true;
             setCommittedPattern(publishedPattern);
+            for (const instrument of allowedRegenerationInstruments) {
+              queuedStructuralCycleRef.current[instrument] = -1;
+            }
             setQueuedCommitInstruments([]);
             setManualPreviewPattern(null);
             setManualPreviewInstruments([]);
@@ -2683,6 +2706,42 @@ function App() {
     // Playback keeps a single next-commit snapshot: every rebuild starts from the
     // latest full source pattern, not from a stack of incremental intents.
     return queuedSourcePatternRef.current ?? patternRef.current;
+  }
+
+  function getQueuedBasePatternForManualInstruments(instruments: InstrumentId[]): GeneratedPattern {
+    const basePattern = getQueuedBasePattern();
+    const currentCycle = playbackLoopCycleRef.current;
+    const revokedInstruments = instruments.filter(
+      (instrument) => queuedStructuralCycleRef.current[instrument] === currentCycle,
+    );
+
+    if (revokedInstruments.length === 0) {
+      return basePattern;
+    }
+
+    const nextEvents = {
+      ...basePattern.events,
+    };
+
+    for (const instrument of revokedInstruments) {
+      nextEvents[instrument] = patternRef.current.events[instrument] ?? [];
+      queuedStructuralCycleRef.current[instrument] = -1;
+    }
+
+    setQueuedCommitInstruments((current) =>
+      current.filter((instrument) => !revokedInstruments.includes(instrument)),
+    );
+
+    const nextPattern = {
+      ...basePattern,
+      events: nextEvents,
+    };
+
+    if (queuedSourcePatternRef.current !== null) {
+      queuedSourcePatternRef.current = nextPattern;
+    }
+
+    return nextPattern;
   }
 
   function stopPlaybackStatefully() {
@@ -3113,6 +3172,7 @@ function App() {
     }
     getPatternPlayer().clearQueuedLoopCommit();
     queuedSourcePatternRef.current = null;
+    queuedStructuralCycleRef.current = createInstrumentCounterRecord(-1);
     rebuildRequestIdRef.current += 1;
     queuedLoopDelayKeyRef.current = null;
     queuedLoopDelayRemainingRef.current = 0;
@@ -3364,6 +3424,7 @@ function App() {
     rebuildRequestIdRef.current += 1;
     for (const instrument of instruments) {
       manualPublishVersionRef.current[instrument] += 1;
+      queuedStructuralCycleRef.current[instrument] = -1;
     }
     queuedLoopDelayKeyRef.current = null;
     queuedLoopDelayRemainingRef.current = 0;
@@ -3467,7 +3528,7 @@ function App() {
     try {
       const instrumentId = instrument as InstrumentId;
       if (playbackStatus === "Playing") {
-        const basePattern = getQueuedBasePattern();
+        const basePattern = getQueuedBasePatternForManualInstruments([instrumentId]);
         const nextPattern = event
           ? removePatternHitLocally(basePattern, instrumentId, barIndex, slotIndex, event.hit_type)
           : addManualBaseHitLocally(
@@ -3527,7 +3588,7 @@ function App() {
     try {
       if (playbackStatus === "Playing") {
         const instrumentId = instrument as InstrumentId;
-        const basePattern = getQueuedBasePattern();
+        const basePattern = getQueuedBasePatternForManualInstruments([instrumentId]);
         const nextPattern = movePatternHitLocally(
           basePattern,
           instrumentId,
@@ -3619,7 +3680,7 @@ function App() {
         getPatternPlayer().queueLoopCommit({
           pattern: mergedPattern,
           bpmOverride: bpm,
-          remainingSafetyLoops: 1,
+          remainingSafetyLoops: 0,
           onApplied: () => {
             queuedLoopDelayKeyRef.current = null;
             queuedSourcePatternRef.current = null;
