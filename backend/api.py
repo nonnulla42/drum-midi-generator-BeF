@@ -21,18 +21,23 @@ from core.timing import parse_grouping
 
 
 def parse_cors_origins() -> list[str]:
-    configured = os.getenv("BACKEND_CORS_ORIGINS", "")
-    origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
-
-    if origins:
-        return origins
-
-    return [
+    default_origins = [
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://ghostgroove.com",
         "https://www.ghostgroove.com",
     ]
+
+    configured = os.getenv("BACKEND_CORS_ORIGINS", "")
+    configured_origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+
+    if configured_origins:
+        # Keep production origins explicit while still allowing local preview/dev frontends.
+        return list(dict.fromkeys([*configured_origins, *default_origins]))
+
+    return default_origins
 
 
 app = FastAPI()
