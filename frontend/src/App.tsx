@@ -1,11 +1,14 @@
 import {
+  type CSSProperties,
   FormEvent,
+  createContext,
   type Dispatch,
   type KeyboardEvent,
   type PointerEvent,
   type SetStateAction,
   type WheelEvent,
   useEffect,
+  useContext,
   useRef,
   useState,
 } from "react";
@@ -28,6 +31,14 @@ import { trackEvent } from "./lib/analytics";
 import { PatternPlayer } from "./playback";
 
 const CUSTOM_PRESET_ID = "custom";
+const APP_FRAME_MAX_WIDTH = 1440;
+const APP_FRAME_MIN_WIDTH = 1220;
+const APP_FRAME_MAX_HEIGHT = 920;
+const APP_FRAME_MIN_HEIGHT = 720;
+const APP_SCALE_PADDING_FALLBACK = 16;
+const APP_SCALE_EPSILON = 0.0001;
+
+const AppScaleContext = createContext(1);
 
 const DEFAULT_KICK = {
   enabled: true,
@@ -1083,6 +1094,91 @@ function clampValue(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function readCssPixelVariable(name: string, fallback: number): number {
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name));
+  return Number.isFinite(value) ? value : fallback;
+}
+
+function measureViewportSize(): { width: number; height: number } {
+  if (typeof window === "undefined") {
+    return { width: APP_FRAME_MAX_WIDTH, height: APP_FRAME_MAX_HEIGHT };
+  }
+
+  return {
+    width: window.visualViewport?.width ?? document.documentElement.clientWidth ?? window.innerWidth,
+    height: window.visualViewport?.height ?? document.documentElement.clientHeight ?? window.innerHeight,
+  };
+}
+
+function calculateAppScaleMetrics(): { frameWidth: number; frameHeight: number; scale: number } {
+  const shellPadding = readCssPixelVariable("--shell-padding", APP_SCALE_PADDING_FALLBACK);
+  const viewport = measureViewportSize();
+  const availableWidth = Math.max(viewport.width - shellPadding * 2, 1);
+  const availableHeight = Math.max(viewport.height - shellPadding * 2, 1);
+  const frameWidth = clampValue(availableWidth, APP_FRAME_MIN_WIDTH, APP_FRAME_MAX_WIDTH);
+  const frameHeight = clampValue(availableHeight, APP_FRAME_MIN_HEIGHT, APP_FRAME_MAX_HEIGHT);
+  const scale = Math.min(availableWidth / frameWidth, availableHeight / frameHeight, 1);
+
+  return {
+    frameWidth: Math.round(frameWidth),
+    frameHeight: Math.round(frameHeight),
+    scale: Number(scale.toFixed(4)),
+  };
+}
+
+function useViewportAppScale(): { frameWidth: number; frameHeight: number; scale: number } {
+  const [metrics, setMetrics] = useState(calculateAppScaleMetrics);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return undefined;
+    }
+
+    let frame = 0;
+
+    const updateMetrics = () => {
+      cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const nextMetrics = calculateAppScaleMetrics();
+
+        setMetrics((currentMetrics) => {
+          if (
+            currentMetrics.frameWidth === nextMetrics.frameWidth &&
+            currentMetrics.frameHeight === nextMetrics.frameHeight &&
+            Math.abs(currentMetrics.scale - nextMetrics.scale) < APP_SCALE_EPSILON
+          ) {
+            return currentMetrics;
+          }
+
+          return nextMetrics;
+        });
+      });
+    };
+
+    updateMetrics();
+    window.addEventListener("resize", updateMetrics);
+    window.visualViewport?.addEventListener("resize", updateMetrics);
+    window.visualViewport?.addEventListener("scroll", updateMetrics);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateMetrics);
+      window.visualViewport?.removeEventListener("resize", updateMetrics);
+      window.visualViewport?.removeEventListener("scroll", updateMetrics);
+    };
+  }, []);
+
+  return metrics;
+}
+
+function useAppScale(): number {
+  return useContext(AppScaleContext);
+}
+
 function snapToStep(value: number, min: number, step: number): number {
   const steps = Math.round((value - min) / step);
   return Number((min + steps * step).toFixed(4));
@@ -1103,6 +1199,7 @@ type KnobControlProps = {
 
 function KnobControl({ label, value, min, max, step, onChange }: KnobControlProps) {
   const dragStateRef = useRef<{ pointerId: number; startY: number; startValue: number } | null>(null);
+  const appScale = useAppScale();
   const normalized = (value - min) / (max - min);
   const angle = -135 + normalized * 270;
 
@@ -1126,7 +1223,7 @@ function KnobControl({ label, value, min, max, step, onChange }: KnobControlProp
     }
 
     const deltaY = dragState.startY - event.clientY;
-    const sensitivity = (max - min) / 140;
+    const sensitivity = (max - min) / (140 * Math.max(appScale, 0.01));
     commitValue(dragState.startValue + deltaY * sensitivity);
   }
 
@@ -2074,6 +2171,7 @@ function GhostPlacementControl({ value, onChange, ariaLabel = "Ghost placement" 
 }
 
 function App() {
+  const { frameWidth, frameHeight, scale: appScale } = useViewportAppScale();
   const [presets, setPresets] = useState<Preset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState(CUSTOM_PRESET_ID);
   const [bpm, setBpm] = useState(120);
@@ -3635,7 +3733,7 @@ function App() {
       return;
     }
 
-    container.scrollLeft += dominantDelta;
+    container.scrollLeft += dominantDelta / Math.max(appScale, 0.01);
     event.preventDefault();
   }
 
@@ -3988,341 +4086,350 @@ function App() {
     });
   }
 
+  const appScaleStyle = {
+    "--app-frame-width": `${frameWidth}px`,
+    "--app-frame-height": `${frameHeight}px`,
+    "--app-scale": appScale,
+  } as CSSProperties;
+
   return (
-    <main className="page-shell">
-      <form className="app-layout" onSubmit={handleGeneratePattern}>
-        <aside className="sidebar card">
-          <header className="hero">
-            <div className="hero-copy">
-              <h1>GhostGroove</h1>
-              <p>generate drum MIDI from musical presets</p>
-            </div>
-
-            <div className="hero-logo" aria-hidden="true">
-              <img src="/logo.svg" alt="" className="hero-logo-mark" />
-            </div>
-          </header>
-
-          <div className="sidebar-form">
-            <section className="section-card">
-              <div className="section-card-head">
-                <h2>Structure</h2>
-                <p>Define meter, grouping, preset, and overall form before shaping individual instruments.</p>
-              </div>
-
-              <ContinuousSliderControl
-                label="BPM"
-                value={bpm}
-                min={40}
-                max={220}
-                step={1}
-                enableWheel
-                showValueInHandle
-                onChange={(nextValue) => {
-                  setBpm(nextValue);
-                }}
-              />
-
-              <HandleOptionSliderControl
-                label="Pattern Length"
-                value={String(bars)}
-                options={PATTERN_LENGTH_OPTIONS}
-                slotCount={4}
-                className="pattern-length-control"
-                showValueInHandle
-                onChange={(nextValue) => {
-                  switchToCustomIfNeeded();
-                  applyStructureChange(Number(nextValue), groupingInput);
-                }}
-              />
-
-              <div className="structure-grouping-row">
-                <label className="field structure-grouping-field">
-                  <span>Beat Grouping</span>
-                  <input
-                    type="text"
-                    value={groupingInput}
-                    onChange={(event) => {
-                      switchToCustomIfNeeded();
-                      setGroupingInput(event.target.value);
-                    }}
-                    onBlur={() => {
-                      if (!currentGroupingError) {
-                        applyStructureChange(bars, groupingInput);
-                      }
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !currentGroupingError) {
-                        event.preventDefault();
-                        applyStructureChange(bars, groupingInput);
-                      }
-                    }}
-                    placeholder="4 or 3+2"
-                  />
-                </label>
-
-                <label className="field structure-time-signature-field">
-                  <span>Time Signature</span>
-                  <input type="text" value={timeSignature} readOnly />
-                </label>
-              </div>
-
-              <label className={`field seed-field ${seedFixedWarningVisible ? "seed-field-warning" : ""}`}>
-                <span>Seed</span>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={seed === "random" ? "" : seed}
-                  placeholder="Random"
-                  onChange={(event) => {
-                    const value = event.target.value.trim();
-                    if (value === "") {
-                      setSeed("random");
-                      return;
-                    }
-                    switchToCustomIfNeeded();
-                    setSeed(Number(value));
-                  }}
-                />
-                <span className={`seed-field-notice ${seedFixedWarningVisible ? "seed-field-notice-visible" : ""}`}>
-                  Pattern unchanged because the seed is fixed.
-                </span>
-              </label>
-            </section>
-
-            <section className="section-card">
-              <div className="section-card-head">
-                <h2>Humanization</h2>
-                <p>Shape feel and repetition without changing the core groove logic.</p>
-              </div>
-
-              <div className="humanization-knob-grid">
-                <div className="humanization-knob-control">
-                  <KnobControl
-                    label="Humanize Timing"
-                    min={0}
-                    max={24}
-                    step={1}
-                    value={humanizeTiming}
-                    onChange={(nextValue) => {
-                      switchToCustomIfNeeded();
-                      setHumanizeTiming(nextValue);
-                    }}
-                  />
-                </div>
-
-                <div className="humanization-knob-control">
-                  <KnobControl
-                    label="Humanize Velocity"
-                    min={0}
-                    max={24}
-                    step={1}
-                    value={humanizeVelocity}
-                    onChange={(nextValue) => {
-                      switchToCustomIfNeeded();
-                      setHumanizeVelocity(nextValue);
-                    }}
-                  />
-                </div>
-
-                <div className="humanization-knob-control">
-                  <KnobControl
-                    label="Swing"
-                    min={0}
-                    max={0.65}
-                    step={0.01}
-                    value={swing}
-                    onChange={(nextValue) => {
-                      switchToCustomIfNeeded();
-                      setSwing(nextValue);
-                    }}
-                  />
-                </div>
-
-                <div className="humanization-knob-control">
-                  <KnobControl
-                    label="Bar Similarity"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={barSimilarity}
-                    onChange={(nextValue) => {
-                      switchToCustomIfNeeded();
-                      setBarSimilarity(nextValue);
-                    }}
-                  />
-                </div>
-              </div>
-            </section>
-
-            <section className="section-card section-card-status">
-              <div className="section-card-head">
-                <h2>Playback & Actions</h2>
-                <p>Generate, preview, export, and toggle edit mode from one stable control area.</p>
-              </div>
-
-              <div className="action-group">
-                <div className="playback-actions">
-                  <div className="playback-actions-row playback-actions-row-primary">
-                    <button
-                      type="submit"
-                      disabled={
-                        isLoadingPresets ||
-                        isGeneratingPattern ||
-                        isGenerating ||
-                        isGeneratingGhosts ||
-                        isEditingPattern ||
-                        !selectedPreset ||
-                        Boolean(currentGroupingError) ||
-                        Boolean(kickVelocityError) ||
-                        Boolean(snareVelocityError) ||
-                        Boolean(hihatClosedVelocityError) ||
-                        Boolean(rideVelocityError) ||
-                        Boolean(hihatOpenVelocityError) ||
-                        Boolean(crashVelocityError) ||
-                        Boolean(tomsVelocityError)
-                      }
-                    >
-                      {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button-secondary button-generate-ghosts"
-                      onClick={() => void handleGenerateGhosts()}
-                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                    >
-                      {isGeneratingGhosts ? "Generating Ghosts..." : "Generate Ghosts"}
-                    </button>
+    <AppScaleContext.Provider value={appScale}>
+      <main className="page-shell">
+        <div className="app-scale-shell" style={appScaleStyle}>
+          <div className="app-scale-inner">
+            <form className="app-layout" onSubmit={handleGeneratePattern}>
+              <aside className="sidebar card">
+                <header className="hero">
+                  <div className="hero-copy">
+                    <h1>GhostGroove</h1>
+                    <p>generate drum MIDI from musical presets</p>
                   </div>
 
-                  <div className="playback-actions-row playback-actions-row-secondary">
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={handleClearPattern}
-                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                    >
-                      Clear
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={handleRandomizeParameters}
-                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                    >
-                      Randomize
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => void handleDownloadMidi()}
-                      disabled={
-                        isLoadingPresets ||
-                        isGeneratingPattern ||
-                        isGenerating ||
-                        isGeneratingGhosts ||
-                        isEditingPattern ||
-                        !selectedPreset ||
-                        Boolean(currentGroupingError) ||
-                        Boolean(kickVelocityError) ||
-                        Boolean(snareVelocityError) ||
-                        Boolean(hihatClosedVelocityError) ||
-                        Boolean(rideVelocityError) ||
-                        Boolean(hihatOpenVelocityError) ||
-                        Boolean(crashVelocityError) ||
-                        Boolean(tomsVelocityError)
-                      }
-                    >
-                      {isGenerating ? "Downloading MIDI..." : patternHasEvents(pattern) ? "Download Edited MIDI" : "Download MIDI"}
-                    </button>
+                  <div className="hero-logo" aria-hidden="true">
+                    <img src="/logo.svg" alt="" className="hero-logo-mark" />
                   </div>
+                </header>
 
-                  <div className="playback-actions-row playback-actions-row-transport">
-                    <button
-                      type="button"
-                      onClick={() => void handlePlay()}
-                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                    >
-                      Play
-                    </button>
+                <div className="sidebar-form">
+                  <section className="section-card">
+                    <div className="section-card-head">
+                      <h2>Structure</h2>
+                      <p>Define meter, grouping, preset, and overall form before shaping individual instruments.</p>
+                    </div>
 
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => void handleStop()}
-                      disabled={playbackStatus !== "Playing"}
-                    >
-                      Stop
-                    </button>
-
-                    <button
-                      type="button"
-                      className="button-secondary"
-                      onClick={() => void handleRestart()}
-                      disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
-                    >
-                      Restart
-                    </button>
-                  </div>
-                </div>
-
-                <div className="toggle-row">
-                  <label className="field-checkbox field-checkbox-panel">
-                    <input
-                      type="checkbox"
-                      checked={isLoopEnabled}
-                      onChange={(event) => {
-                        const nextValue = event.target.checked;
-                        setIsLoopEnabled(nextValue);
-                        getPatternPlayer().setLoopEnabled(nextValue);
+                    <ContinuousSliderControl
+                      label="BPM"
+                      value={bpm}
+                      min={40}
+                      max={220}
+                      step={1}
+                      enableWheel
+                      showValueInHandle
+                      onChange={(nextValue) => {
+                        setBpm(nextValue);
                       }}
                     />
-                    <span>Loop</span>
-                  </label>
 
-                  <label className="field-checkbox field-checkbox-panel">
-                    <input
-                      type="checkbox"
-                      checked={isEditGridEnabled}
-                      onChange={(event) => {
-                        setIsEditGridEnabled(event.target.checked);
-                        if (!event.target.checked) {
-                          setDragState(null);
-                        }
+                    <HandleOptionSliderControl
+                      label="Pattern Length"
+                      value={String(bars)}
+                      options={PATTERN_LENGTH_OPTIONS}
+                      slotCount={4}
+                      className="pattern-length-control"
+                      showValueInHandle
+                      onChange={(nextValue) => {
+                        switchToCustomIfNeeded();
+                        applyStructureChange(Number(nextValue), groupingInput);
                       }}
                     />
-                    <span>Edit Grid</span>
-                  </label>
+
+                    <div className="structure-grouping-row">
+                      <label className="field structure-grouping-field">
+                        <span>Beat Grouping</span>
+                        <input
+                          type="text"
+                          value={groupingInput}
+                          onChange={(event) => {
+                            switchToCustomIfNeeded();
+                            setGroupingInput(event.target.value);
+                          }}
+                          onBlur={() => {
+                            if (!currentGroupingError) {
+                              applyStructureChange(bars, groupingInput);
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && !currentGroupingError) {
+                              event.preventDefault();
+                              applyStructureChange(bars, groupingInput);
+                            }
+                          }}
+                          placeholder="4 or 3+2"
+                        />
+                      </label>
+
+                      <label className="field structure-time-signature-field">
+                        <span>Time Signature</span>
+                        <input type="text" value={timeSignature} readOnly />
+                      </label>
+                    </div>
+
+                    <label className={`field seed-field ${seedFixedWarningVisible ? "seed-field-warning" : ""}`}>
+                      <span>Seed</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={seed === "random" ? "" : seed}
+                        placeholder="Random"
+                        onChange={(event) => {
+                          const value = event.target.value.trim();
+                          if (value === "") {
+                            setSeed("random");
+                            return;
+                          }
+                          switchToCustomIfNeeded();
+                          setSeed(Number(value));
+                        }}
+                      />
+                      <span className={`seed-field-notice ${seedFixedWarningVisible ? "seed-field-notice-visible" : ""}`}>
+                        Pattern unchanged because the seed is fixed.
+                      </span>
+                    </label>
+                  </section>
+
+                  <section className="section-card">
+                    <div className="section-card-head">
+                      <h2>Humanization</h2>
+                      <p>Shape feel and repetition without changing the core groove logic.</p>
+                    </div>
+
+                    <div className="humanization-knob-grid">
+                      <div className="humanization-knob-control">
+                        <KnobControl
+                          label="Humanize Timing"
+                          min={0}
+                          max={24}
+                          step={1}
+                          value={humanizeTiming}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setHumanizeTiming(nextValue);
+                          }}
+                        />
+                      </div>
+
+                      <div className="humanization-knob-control">
+                        <KnobControl
+                          label="Humanize Velocity"
+                          min={0}
+                          max={24}
+                          step={1}
+                          value={humanizeVelocity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setHumanizeVelocity(nextValue);
+                          }}
+                        />
+                      </div>
+
+                      <div className="humanization-knob-control">
+                        <KnobControl
+                          label="Swing"
+                          min={0}
+                          max={0.65}
+                          step={0.01}
+                          value={swing}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setSwing(nextValue);
+                          }}
+                        />
+                      </div>
+
+                      <div className="humanization-knob-control">
+                        <KnobControl
+                          label="Bar Similarity"
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={barSimilarity}
+                          onChange={(nextValue) => {
+                            switchToCustomIfNeeded();
+                            setBarSimilarity(nextValue);
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="section-card section-card-status">
+                    <div className="section-card-head">
+                      <h2>Playback & Actions</h2>
+                      <p>Generate, preview, export, and toggle edit mode from one stable control area.</p>
+                    </div>
+
+                    <div className="action-group">
+                      <div className="playback-actions">
+                        <div className="playback-actions-row playback-actions-row-primary">
+                          <button
+                            type="submit"
+                            disabled={
+                              isLoadingPresets ||
+                              isGeneratingPattern ||
+                              isGenerating ||
+                              isGeneratingGhosts ||
+                              isEditingPattern ||
+                              !selectedPreset ||
+                              Boolean(currentGroupingError) ||
+                              Boolean(kickVelocityError) ||
+                              Boolean(snareVelocityError) ||
+                              Boolean(hihatClosedVelocityError) ||
+                              Boolean(rideVelocityError) ||
+                              Boolean(hihatOpenVelocityError) ||
+                              Boolean(crashVelocityError) ||
+                              Boolean(tomsVelocityError)
+                            }
+                          >
+                            {isGeneratingPattern ? "Generating Pattern..." : "Generate Pattern"}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button-secondary button-generate-ghosts"
+                            onClick={() => void handleGenerateGhosts()}
+                            disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                          >
+                            {isGeneratingGhosts ? "Generating Ghosts..." : "Generate Ghosts"}
+                          </button>
+                        </div>
+
+                        <div className="playback-actions-row playback-actions-row-secondary">
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={handleClearPattern}
+                            disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                          >
+                            Clear
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={handleRandomizeParameters}
+                            disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                          >
+                            Randomize
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => void handleDownloadMidi()}
+                            disabled={
+                              isLoadingPresets ||
+                              isGeneratingPattern ||
+                              isGenerating ||
+                              isGeneratingGhosts ||
+                              isEditingPattern ||
+                              !selectedPreset ||
+                              Boolean(currentGroupingError) ||
+                              Boolean(kickVelocityError) ||
+                              Boolean(snareVelocityError) ||
+                              Boolean(hihatClosedVelocityError) ||
+                              Boolean(rideVelocityError) ||
+                              Boolean(hihatOpenVelocityError) ||
+                              Boolean(crashVelocityError) ||
+                              Boolean(tomsVelocityError)
+                            }
+                          >
+                            {isGenerating ? "Downloading MIDI..." : patternHasEvents(pattern) ? "Download Edited MIDI" : "Download MIDI"}
+                          </button>
+                        </div>
+
+                        <div className="playback-actions-row playback-actions-row-transport">
+                          <button
+                            type="button"
+                            onClick={() => void handlePlay()}
+                            disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                          >
+                            Play
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => void handleStop()}
+                            disabled={playbackStatus !== "Playing"}
+                          >
+                            Stop
+                          </button>
+
+                          <button
+                            type="button"
+                            className="button-secondary"
+                            onClick={() => void handleRestart()}
+                            disabled={isLoadingPresets || isGeneratingPattern || isGenerating || isGeneratingGhosts || isEditingPattern}
+                          >
+                            Restart
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="toggle-row">
+                        <label className="field-checkbox field-checkbox-panel">
+                          <input
+                            type="checkbox"
+                            checked={isLoopEnabled}
+                            onChange={(event) => {
+                              const nextValue = event.target.checked;
+                              setIsLoopEnabled(nextValue);
+                              getPatternPlayer().setLoopEnabled(nextValue);
+                            }}
+                          />
+                          <span>Loop</span>
+                        </label>
+
+                        <label className="field-checkbox field-checkbox-panel">
+                          <input
+                            type="checkbox"
+                            checked={isEditGridEnabled}
+                            onChange={(event) => {
+                              setIsEditGridEnabled(event.target.checked);
+                              if (!event.target.checked) {
+                                setDragState(null);
+                              }
+                            }}
+                          />
+                          <span>Edit Grid</span>
+                        </label>
+                      </div>
+
+                      <div className="message playback-status">
+                        <span>Playback: {playbackStatus}</span>
+                        <span className="playback-status-detail">{playbackStatusDetail()}</span>
+                      </div>
+                    </div>
+                  </section>
+                </div>
+              </aside>
+
+              <section className="workspace">
+                <div className="workspace-header">
+                  <h2>Instruments</h2>
+                  <p>Shape individual layers without changing the core groove logic or control behavior.</p>
                 </div>
 
-                <div className="message playback-status">
-                  <span>Playback: {playbackStatus}</span>
-                  <span className="playback-status-detail">{playbackStatusDetail()}</span>
-                </div>
-              </div>
-            </section>
-          </div>
-        </aside>
+                <div className="instrument-bands">
+                  <div className="backbone-cluster">
+                  <section className="band-card band-card-backbone">
+                    <div className="band-header">
+                      <h3>Backbone</h3>
+                      <p>Kick and snare define the structural weight of the groove.</p>
+                    </div>
 
-        <section className="workspace">
-          <div className="workspace-header">
-            <h2>Instruments</h2>
-            <p>Shape individual layers without changing the core groove logic or control behavior.</p>
-          </div>
-
-          <div className="instrument-bands">
-            <div className="backbone-cluster">
-            <section className="band-card band-card-backbone">
-              <div className="band-header">
-                <h3>Backbone</h3>
-                <p>Kick and snare define the structural weight of the groove.</p>
-              </div>
-
-              <div className="band-grid band-grid-backbone">
+                    <div className="band-grid band-grid-backbone">
               <section
                 className={`instrument-card instrument-card-kick ${kickEnabled ? "instrument-card-green-enabled" : "instrument-card-green-disabled"}`}
               >
@@ -5262,42 +5369,45 @@ function App() {
             </div>
           </section>
         </section>
-      </form>
-      {pendingStructureChange ? (
-        <div
-          className="structure-confirm-overlay"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              cancelPendingStructureChange();
-            }
-          }}
-        >
-          <div
-            className="structure-confirm-modal card"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="structure-confirm-title"
-            aria-describedby="structure-confirm-body"
-          >
-            <div className="structure-confirm-head">
-              <h2 id="structure-confirm-title">Reset current pattern?</h2>
-              <p id="structure-confirm-body">
-                Changing pattern length or beat grouping will clear the current grid.
-              </p>
-            </div>
+            </form>
+            {pendingStructureChange ? (
+              <div
+                className="structure-confirm-overlay"
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    cancelPendingStructureChange();
+                  }
+                }}
+              >
+                <div
+                  className="structure-confirm-modal card"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="structure-confirm-title"
+                  aria-describedby="structure-confirm-body"
+                >
+                  <div className="structure-confirm-head">
+                    <h2 id="structure-confirm-title">Reset current pattern?</h2>
+                    <p id="structure-confirm-body">
+                      Changing pattern length or beat grouping will clear the current grid.
+                    </p>
+                  </div>
 
-            <div className="structure-confirm-actions">
-              <button type="button" className="button-secondary" onClick={cancelPendingStructureChange}>
-                Cancel
-              </button>
-              <button type="button" onClick={confirmPendingStructureChange}>
-                Reset grid
-              </button>
-            </div>
+                  <div className="structure-confirm-actions">
+                    <button type="button" className="button-secondary" onClick={cancelPendingStructureChange}>
+                      Cancel
+                    </button>
+                    <button type="button" onClick={confirmPendingStructureChange}>
+                      Reset grid
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
-      ) : null}
-    </main>
+      </main>
+    </AppScaleContext.Provider>
   );
 }
 

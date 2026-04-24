@@ -184,19 +184,38 @@ summary {
 }
 
 .page-shell {
-  min-height: 100vh;
+  width: 100%;
+  min-height: 100dvh;
   padding: var(--shell-padding);
   display: grid;
   place-items: center;
-  overflow: auto;
+  overflow: hidden;
+}
+
+.app-scale-shell {
+  position: relative;
+  width: calc(var(--app-frame-width) * var(--app-scale));
+  height: calc(var(--app-frame-height) * var(--app-scale));
+  max-width: 100%;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.app-scale-inner {
+  position: relative;
+  width: var(--app-frame-width);
+  height: var(--app-frame-height);
+  transform: scale(var(--app-scale));
+  transform-origin: top left;
+  will-change: transform;
 }
 
 .app-layout {
   position: relative;
-  width: min(100%, var(--plugin-frame-width));
-  min-width: min(100%, var(--plugin-frame-min-width));
-  height: min(calc(100vh - (var(--shell-padding) * 2)), var(--plugin-frame-height));
-  min-height: 720px;
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
   margin: 0 auto;
   padding: 14px;
   display: grid;
@@ -1890,12 +1909,12 @@ button:disabled {
 
 .instrument-card-snare {
   overflow-x: hidden;
-  overflow-y: hidden;
+  overflow-y: auto;
 }
 
 .instrument-card-kick {
   overflow-x: hidden;
-  overflow-y: hidden;
+  overflow-y: auto;
   grid-area: kick;
 }
 
@@ -3641,373 +3660,4 @@ button:disabled {
 .fill-step-control .plugin-control-head span {
   color: var(--slider-knob-neon);
   text-shadow: 0 0 8px rgba(80, 237, 127, 0.14);
-}
-
-@media (max-width: 1400px) {
-  :root {
-    font-size: 77%;
-    --plugin-frame-width: 1320px;
-    --plugin-frame-min-width: 1120px;
-  }
-
-  .app-layout {
-    grid-template-columns: 264px minmax(0, 1fr);
-  }
-
-  .instrument-bands {
-    grid-template-columns: repeat(3, minmax(280px, 1fr));
-    overflow-x: auto;
-    overflow-y: hidden;
-    padding-bottom: 2px;
-  }
-
-  .band-card {
-    min-width: 280px;
-  }
-}
-
-@media (min-width: 1181px) and (max-height: 820px) {
-  :root {
-    font-size: 74%;
-    --plugin-frame-height: 860px;
-  }
-
-  .page-shell {
-    padding: 8px;
-  }
-
-  .app-layout {
-    grid-template-columns: 256px minmax(0, 1fr);
-    gap: 10px;
-  }
-
-  .sidebar {
-    padding: 12px;
-    gap: 8px;
-  }
-
-  .sidebar-form {
-    gap: 8px;
-    padding-right: 2px;
-  }
-
-  .hero h1 {
-    font-size: 1.32rem;
-  }
-
-  .hero p {
-    margin-top: 2px;
-    font-size: 0.76rem;
-  }
-
-  .workspace {
-    gap: 10px;
-  }
-
-  .section-card,
-  .band-card {
-    padding: 10px;
-  }
-
-  .section-card {
-    gap: 8px;
-  }
-
-  .section-card-head h2,
-  .band-header h3 {
-    font-size: 0.75rem;
-  }
-
-  .field {
-    gap: 3px;
-  }
-
-  .field span,
-  .field-checkbox span,
-  .knob-control-head span,
-  .plugin-control-head span,
-  .pattern-row-label,
-  .velocity-range-values {
-    font-size: 0.68rem;
-  }
-
-  .field input,
-  .field select {
-    padding: 7px 9px;
-  }
-
-  .instrument-bands {
-    gap: 10px;
-  }
-
-  .band-card {
-    gap: 6px;
-  }
-
-  .band-grid {
-    gap: 6px;
-  }
-
-  .instrument-card {
-    padding: 8px;
-  }
-
-  .instrument-head {
-    margin-bottom: 4px;
-  }
-
-  .instrument-head h3 {
-    font-size: 0.8rem;
-  }
-
-  .instrument-body,
-  .section {
-    gap: 5px;
-  }
-
-  .instrument-body-kick {
-    gap: 14px;
-  }
-
-  .kick-top-row {
-    grid-template-columns: 64px minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .snare-top-row {
-    grid-template-columns: 64px minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .kick-top-cell-timing .field {
-    min-height: 116px;
-    grid-template-rows: 88px var(--panel-label-row-height);
-  }
-
-  .snare-top-cell-timing .field {
-    min-height: 116px;
-    grid-template-rows: 88px var(--panel-label-row-height);
-  }
-
-  .kick-top-cell-density .knob-control {
-    min-height: 116px;
-    width: 64px;
-  }
-
-  .snare-top-cell-density .knob-control {
-    min-height: 116px;
-    width: 64px;
-  }
-
-  .kick-top-cell-density .knob {
-    width: 64px;
-    height: 64px;
-  }
-
-  .snare-top-cell-density .knob {
-    width: 64px;
-    height: 64px;
-  }
-
-  .kick-top-cell-density .knob-face {
-    width: 56px;
-    height: 56px;
-  }
-
-  .snare-top-cell-density .knob-face {
-    width: 56px;
-    height: 56px;
-  }
-
-  .kick-top-cell-density .knob-face::before {
-    inset: 5px;
-  }
-
-  .snare-top-cell-density .knob-face::before {
-    inset: 5px;
-  }
-
-  .kick-top-cell-density .knob-indicator {
-    top: 6px;
-    height: 18px;
-    transform-origin: 50% 21px;
-  }
-
-  .snare-top-cell-density .knob-indicator {
-    top: 6px;
-    height: 18px;
-    transform-origin: 50% 21px;
-  }
-
-  .kick-top-cell-density .knob-value {
-    font-size: 0.76rem;
-  }
-
-  .snare-top-cell-density .knob-value {
-    font-size: 0.76rem;
-  }
-
-  .knob {
-    width: 82px;
-    height: 82px;
-  }
-
-  .knob-face {
-    width: 74px;
-    height: 74px;
-  }
-
-  .knob-face::before {
-    inset: 7px;
-  }
-
-  .knob-indicator {
-    top: 8px;
-    height: 24px;
-    transform-origin: 50% 29px;
-  }
-
-  .knob-value {
-    font-size: 0.9rem;
-  }
-
-  .timing-feel-button,
-  button,
-  .segment-button {
-    min-height: 32px;
-    padding-top: 7px;
-    padding-bottom: 7px;
-  }
-
-  .timing-feel-button-label,
-  .segment-button {
-    font-size: 0.7rem;
-  }
-
-  .stepped-slider {
-    padding-bottom: 0;
-  }
-
-  .velocity-range {
-    gap: 10px;
-  }
-
-  .pattern-grid-card {
-    padding: 12px;
-    gap: 10px;
-  }
-
-  .pattern-grid-head p,
-  .pattern-empty p {
-    font-size: 0.74rem;
-  }
-
-  .pattern-grid-head-meta {
-    gap: 10px;
-  }
-
-  .structure-confirm-overlay {
-    padding: 18px;
-  }
-
-  .pattern-grid {
-    gap: 12px;
-  }
-
-  .pattern-grid-head {
-    grid-template-columns: 108px minmax(0, 1fr);
-  }
-
-  .pattern-row {
-    grid-template-columns: 108px minmax(0, 1fr);
-    gap: 10px;
-  }
-
-  .pattern-bar {
-    padding: 6px;
-  }
-}
-
-@media (max-width: 1180px) {
-  body {
-    overflow: auto;
-  }
-
-  .page-shell {
-    min-height: 100vh;
-    display: block;
-  }
-
-  .app-layout {
-    width: 100%;
-    min-width: 0;
-    height: auto;
-    min-height: 0;
-    padding: 12px;
-    grid-template-columns: 1fr;
-    border-radius: 14px;
-    overflow: visible;
-  }
-
-  .workspace {
-    grid-template-rows: auto minmax(360px, 1fr);
-  }
-
-  .sidebar,
-  .sidebar-form,
-  .pattern-grid-scroll {
-    overflow: visible;
-  }
-
-  .instrument-bands {
-    grid-template-columns: 1fr;
-    overflow: visible;
-  }
-
-  .band-grid-2,
-  .band-grid-3,
-  .band-grid-accents {
-    grid-template-columns: 1fr;
-    grid-template-rows: none;
-  }
-
-  .instrument-card {
-    overflow: visible;
-  }
-}
-
-@media (max-width: 760px) {
-  .page-shell {
-    padding: 10px;
-  }
-
-  .app-layout {
-    padding: 10px;
-    border-radius: 12px;
-  }
-
-  .playback-actions,
-  .toggle-row,
-  .inline-fields,
-  .range-fields {
-    grid-template-columns: 1fr;
-  }
-
-  .pattern-grid-head {
-    grid-template-columns: 1fr;
-    gap: 6px;
-  }
-
-  .pattern-grid-head-meta {
-    flex-wrap: wrap;
-  }
-
-  .structure-confirm-actions {
-    grid-template-columns: 1fr;
-    display: grid;
-  }
-
-  .pattern-row {
-    grid-template-columns: 1fr;
-  }
 }
