@@ -2795,6 +2795,7 @@ button:disabled {
 .snare-ghost-top-row {
   grid-template-columns: 60px 44px 52px;
   gap: 4px;
+  min-height: 84px;
 }
 
 .hihat-closed-ghost-top-row,
